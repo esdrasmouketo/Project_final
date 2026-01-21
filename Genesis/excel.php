@@ -1,72 +1,70 @@
 <?php
-  // Paramètres de connexion à la base de données
-  $DB_TBLName = "table_capteurs"; // Nom de la table
-  $xls_filename = 'Serre_Rapport_Du_' . date('d-m-Y') . '.csv'; // Nom du fichier CSV
+/**
+ * Export CSV sécurisé - GENESIS
+ * ATTENTION: Cette opération supprime les données après export
+ */
+require_once __DIR__ . '/auth_check.php';
 
-  // Connexion à la base de données
-  $conn = new mysqli("localhost", "root", "", "ardbd");
+$conn = getDBConnection();
 
-  // Vérification de la connexion
-  if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-  }
+$DB_TBLName = "table_capteurs";
+$xls_filename = 'Serre_Rapport_Du_' . date('d-m-Y') . '.csv';
 
-  // Définir l'encodage de la base de données pour éviter les problèmes de caractères
-  $conn->query("SET NAMES 'utf8'");
+try {
+    // Définir l'encodage
+    $conn->exec("SET NAMES 'utf8'");
 
-  // Récupérer les données de la table
-  $sql = "SELECT * FROM $DB_TBLName";
-  $result = $conn->query($sql);
+    // Récupérer les données de la table
+    $stmt = $conn->query("SELECT * FROM $DB_TBLName");
+    $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-  // Vérifier si des résultats sont trouvés
-  if ($result && $result->num_rows > 0) {
-    // Récupérer les noms des colonnes
-    $fields_Name = [];
-    $finfo = $result->fetch_fields();
-    foreach ($finfo as $field) {
-      $fields_Name[] = $field->name;
-    }
+    // Vérifier si des résultats sont trouvés
+    if (count($result) > 0) {
+        // Récupérer les noms des colonnes
+        $fields_Name = array_keys($result[0]);
 
-    // Paramètres pour le téléchargement du fichier CSV
-    header("Content-Type: application/csv");
-    header("Content-Disposition: attachment; filename=$xls_filename");
-    header("Pragma: no-cache");
-    header("Expires: 0");
+        // Paramètres pour le téléchargement du fichier CSV
+        header("Content-Type: text/csv; charset=utf-8");
+        header("Content-Disposition: attachment; filename=\"" . $xls_filename . "\"");
+        header("Pragma: no-cache");
+        header("Expires: 0");
+        header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
 
-    // Ajouter un BOM pour la compatibilité avec Excel (support UTF-8)
-    echo chr(0xEF) . chr(0xBB) . chr(0xBF);
+        // Ajouter un BOM pour la compatibilité avec Excel (support UTF-8)
+        echo chr(0xEF) . chr(0xBB) . chr(0xBF);
 
-    // Écrire les noms des colonnes
-    echo implode(',', $fields_Name) . "\n";
+        // Ouvrir le flux de sortie
+        $output = fopen('php://output', 'w');
 
-    // Écrire les données des lignes
-    while ($row = $result->fetch_assoc()) {
-      $csv_row = [];
-      foreach ($fields_Name as $field) {
-        $value = isset($row[$field]) ? $row[$field] : null;
-        $csv_row[] = $value !== null ? '"' . str_replace('"', '""', $value) . '"' : '';
-      }
-      echo implode(',', $csv_row) . "\n";
-    }
+        // Écrire les noms des colonnes
+        fputcsv($output, $fields_Name);
 
-    // Libérer la mémoire de la requête
-    $result->free();
+        // Écrire les données des lignes
+        foreach ($result as $row) {
+            fputcsv($output, $row);
+        }
 
-    // Supprimer le contenu de la table après génération du fichier CSV
-    $delete_sql = "DELETE FROM $DB_TBLName";
-    if ($conn->query($delete_sql) === TRUE) {
-      // Optionnel : vous pouvez ajouter une confirmation de la suppression ici si nécessaire
-      // echo "Les données ont été supprimées de la base de données.";
+        fclose($output);
+
+        // Supprimer le contenu de la table après génération du fichier CSV
+        // Note: En production, vous pourriez vouloir archiver plutôt que supprimer
+        $conn->exec("DELETE FROM $DB_TBLName");
+
+        // Logger l'action
+        error_log("Export CSV effectué par " . ($_SESSION['username'] ?? 'unknown') . " - " . count($result) . " lignes exportées et supprimées");
+
+        exit();
+
     } else {
-      // Optionnel : gérer les erreurs de suppression
-      // echo "Erreur de suppression des données: " . $conn->error;
+        $_SESSION['error'] = "Aucune donnée à exporter.";
+        header('Location: index.php');
+        exit();
     }
 
-  } else {
-    // Gérer le cas où aucune donnée n'est trouvée
-    echo "Aucune donnée à exporter.";
-  }
-
-  // Fermer la connexion
-  $conn->close();
+} catch (PDOException $e) {
+    error_log("Erreur export CSV: " . $e->getMessage());
+    $_SESSION['error'] = "Erreur lors de l'export des données.";
+    header('Location: index.php');
+    exit();
+}
 ?>

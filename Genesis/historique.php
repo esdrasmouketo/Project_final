@@ -1,29 +1,29 @@
 <?php
-session_start();
+/**
+ * Page historique sécurisée - GENESIS
+ */
+require_once __DIR__ . '/auth_check.php';
 
-// =====================
-// Connexion à la base
-// =====================
-$host = 'localhost';
-$db   = 'ardbd';
-$user = 'root';
-$pass = '';
-$charset = 'utf8mb4';
+$conn = getDBConnection();
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
-try {
-    $conn = new PDO($dsn, $user, $pass);
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die('Erreur de connexion : ' . $e->getMessage());
-}
-
-// =====================
 // Filtre par date et paramètre
-// =====================
 $date_debut = $_GET['date_debut'] ?? '';
 $date_fin = $_GET['date_fin'] ?? '';
 $param_filter = $_GET['param_filter'] ?? 'all';
+
+// Validation des dates
+if ($date_debut && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_debut)) {
+    $date_debut = '';
+}
+if ($date_fin && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_fin)) {
+    $date_fin = '';
+}
+
+// Validation du filtre de paramètre
+$allowed_filters = ['all', 'temperature', 'eau', 'co2', 'arrosage'];
+if (!in_array($param_filter, $allowed_filters)) {
+    $param_filter = 'all';
+}
 
 $sql = "SELECT * FROM table_capteurs";
 $where = [];
@@ -66,6 +66,7 @@ foreach($results as $row){
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Historique des mesures - Genesis</title>
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
@@ -124,29 +125,7 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; ba
 </head>
 <body>
 
-<!-- ===== NAVBAR TOP ===== -->
-<div class="navbar-top">
-    <div class="brand"><i class="fa fa-leaf"></i> Genesis</div>
-    <div class="navbar-toggle" id="toggleSidebar">
-        <div class="icon-bar"></div>
-        <div class="icon-bar"></div>
-        <div class="icon-bar"></div>
-    </div>
-    <div class="buttons">
-        <a href="logout.php" class="btn btn-danger"><i class="fa fa-sign-out"></i> Déconnexion</a>
-    </div>
-</div>
-
-<!-- ===== SIDEBAR ===== -->
-<div class="sidebar" id="sidebar">
-    <h2>Menu</h2>
-    <ul>
-        <li><a href="index.php"><i class="fa fa-home"></i> Accueil</a></li>
-        <li><a href="parametrage.php"><i class="fa fa-cog"></i> Paramétrage</a></li>
-        <li class="active"><a href="historique.php"><i class="fa fa-history"></i> Historique</a></li>
-        <li><a href="ia.php"><i class="fa fa-android"></i> Assistant IA</a></li>
-    </ul>
-</div>
+<?php include __DIR__ . '/menu.php'; ?>
 
 <!-- ===== CONTENU PRINCIPAL ===== -->
 <div class="main-content">
@@ -155,19 +134,25 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; ba
 
 <!-- Filtres -->
 <form method="get" class="form-inline">
-    <label>Date début:</label>
-    <input type="date" name="date_debut" value="<?= htmlspecialchars($date_debut) ?>" class="form-control">
-    <label>Date fin:</label>
-    <input type="date" name="date_fin" value="<?= htmlspecialchars($date_fin) ?>" class="form-control">
-    <label>Filtrer paramètre:</label>
-    <select name="param_filter" class="form-control">
-        <option value="Tout" <?= $param_filter=='all'?'selected':'' ?>>Tous</option>
-        <option value="temperature" <?= $param_filter=='temperature'?'selected':'' ?>>Température critique</option>
-        <option value="eau" <?= $param_filter=='eau'?'selected':'' ?>>Eau faible</option>
-        <option value="co2" <?= $param_filter=='co2'?'selected':'' ?>>CO₂ élevé</option>
-        <option value="arrosage" <?= $param_filter=='arrosage'?'selected':'' ?>>Arrosage actif</option>
-    </select>
-    <button type="submit" class="btn btn-success">Filtrer</button>
+    <div class="form-group">
+        <label>Date début:</label>
+        <input type="date" name="date_debut" value="<?php echo e($date_debut); ?>" class="form-control">
+    </div>
+    <div class="form-group">
+        <label>Date fin:</label>
+        <input type="date" name="date_fin" value="<?php echo e($date_fin); ?>" class="form-control">
+    </div>
+    <div class="form-group">
+        <label>Filtrer paramètre:</label>
+        <select name="param_filter" class="form-control">
+            <option value="all" <?php echo $param_filter=='all'?'selected':''; ?>>Tous</option>
+            <option value="temperature" <?php echo $param_filter=='temperature'?'selected':''; ?>>Température critique</option>
+            <option value="eau" <?php echo $param_filter=='eau'?'selected':''; ?>>Eau faible</option>
+            <option value="co2" <?php echo $param_filter=='co2'?'selected':''; ?>>CO2 élevé</option>
+            <option value="arrosage" <?php echo $param_filter=='arrosage'?'selected':''; ?>>Arrosage actif</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-success"><i class="fa fa-filter"></i> Filtrer</button>
 </form>
 <br>
 
@@ -175,40 +160,40 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; ba
 <table id="tableHistorique" class="table table-striped table-bordered">
     <thead>
         <tr>
-            <th>Date & Heure</th>
+            <th>Date &amp; Heure</th>
             <th>Température (°C)</th>
             <th>Humidité (%)</th>
             <th>Niveau d'eau</th>
             <th>Lumière</th>
-            <th>CO₂</th>
+            <th>CO2</th>
             <th>Arrosage</th>
             <th>Alertes</th>
         </tr>
     </thead>
     <tbody>
-        <?php foreach($results as $row): 
+        <?php foreach($results as $row):
             $alertes = [];
-            if($row['temperature']>30) $alertes[]="Trop chaud 🌡️";
-            if($row['temperature']<15) $alertes[]="Trop froid ❄️";
-            if($row['niveau_eau']<20) $alertes[]="Eau faible 💧";
-            if($row['co2_level']>800) $alertes[]="CO₂ élevé 🟢";
+            if($row['temperature']>30) $alertes[]="Trop chaud";
+            if($row['temperature']<15) $alertes[]="Trop froid";
+            if($row['niveau_eau']<20) $alertes[]="Eau faible";
+            if($row['co2_level']>800) $alertes[]="CO2 élevé";
         ?>
-        <tr class="<?= ($row['temperature']>30||$row['temperature']<15)?'alert-high':(($row['niveau_eau']<20)?'alert-low':'') ?>">
-            <td><?= $row['date_heure'] ?></td>
-            <td><?= $row['temperature'] ?></td>
-            <td><?= $row['humidity'] ?></td>
-            <td><?= $row['niveau_eau'] ?></td>
-            <td><?= $row['niveau_lumiere'] ?></td>
-            <td><?= $row['co2_level'] ?></td>
-            <td><?= $row['arrosage']? 'Oui':'Non' ?></td>
-            <td><?= implode(', ',$alertes) ?></td>
+        <tr class="<?php echo ($row['temperature']>30||$row['temperature']<15)?'alert-high':(($row['niveau_eau']<20)?'alert-low':''); ?>">
+            <td><?php echo e($row['date_heure']); ?></td>
+            <td><?php echo e($row['temperature']); ?></td>
+            <td><?php echo e($row['humidity']); ?></td>
+            <td><?php echo e($row['niveau_eau']); ?></td>
+            <td><?php echo e($row['niveau_lumiere']); ?></td>
+            <td><?php echo e($row['co2_level']); ?></td>
+            <td><?php echo $row['arrosage']? 'Oui':'Non'; ?></td>
+            <td><?php echo e(implode(', ',$alertes)); ?></td>
         </tr>
         <?php endforeach; ?>
     </tbody>
 </table>
 
 <hr>
-<h3 class="text-success">Graphiques</h3>
+<h3 class="text-success"><i class="fa fa-line-chart"></i> Graphiques</h3>
 <canvas id="chartMulti" height="100"></canvas>
 </div>
 
@@ -216,27 +201,32 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; ba
 // Toggle sidebar mobile
 const toggleBtn = document.getElementById('toggleSidebar');
 const sidebar = document.getElementById('sidebar');
-toggleBtn.addEventListener('click', () => { sidebar.classList.toggle('show'); });
+if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener('click', () => { sidebar.classList.toggle('show'); });
+}
 
 // DataTable avec export
 $(document).ready(function() {
     $('#tableHistorique').DataTable({
         dom: 'Bfrtip',
         buttons: ['excel', 'print'],
-        order: [[0,'desc']]
+        order: [[0,'desc']],
+        language: {
+            url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/fr-FR.json'
+        }
     });
 });
 
 // Graphique Chart.js
-const labels = <?= json_encode($dates) ?>;
+const labels = <?php echo json_encode($dates); ?>;
 const data = {
     labels: labels,
     datasets: [
-        { label: 'Température (°C)', data: <?= json_encode($temperature) ?>, borderColor:'red', fill:false, tension:0.3, pointRadius:2 },
-        { label: 'Humidité (%)', data: <?= json_encode($humidity) ?>, borderColor:'blue', fill:false, tension:0.3, pointRadius:2 },
-        { label: 'Niveau d\'eau (L)', data: <?= json_encode($niveau_eau) ?>, borderColor:'aqua', fill:false, tension:0.3, pointRadius:2 },
-        { label: 'Lumière (lux)', data: <?= json_encode($niveau_lumiere) ?>, borderColor:'orange', fill:false, tension:0.3, pointRadius:2 },
-        { label: 'CO₂ (ppm)', data: <?= json_encode($co2) ?>, borderColor:'green', fill:false, tension:0.3, pointRadius:2 }
+        { label: 'Température (°C)', data: <?php echo json_encode($temperature); ?>, borderColor:'red', fill:false, tension:0.3, pointRadius:2 },
+        { label: 'Humidité (%)', data: <?php echo json_encode($humidity); ?>, borderColor:'blue', fill:false, tension:0.3, pointRadius:2 },
+        { label: 'Niveau d\'eau (L)', data: <?php echo json_encode($niveau_eau); ?>, borderColor:'aqua', fill:false, tension:0.3, pointRadius:2 },
+        { label: 'Lumière (lux)', data: <?php echo json_encode($niveau_lumiere); ?>, borderColor:'orange', fill:false, tension:0.3, pointRadius:2 },
+        { label: 'CO2 (ppm)', data: <?php echo json_encode($co2); ?>, borderColor:'green', fill:false, tension:0.3, pointRadius:2 }
     ]
 };
 const config = { type:'line', data:data, options:{ responsive:true, plugins:{ legend:{ position:'top' } } } };

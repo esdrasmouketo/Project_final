@@ -1,23 +1,18 @@
 <?php
-session_start();
+/**
+ * Page gestion techniciens et maintenance sécurisée - GENESIS
+ */
+require_once __DIR__ . '/auth_check.php';
 
-// Connexion DB
-$host='localhost'; $db='ardbd'; $user='root'; $pass=''; $charset='utf8mb4';
-$dsn="mysql:host=$host;dbname=$db;charset=$charset";
-try { 
-    $conn = new PDO($dsn,$user,$pass); 
-    $conn->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION); 
-} catch(PDOException $e){ 
-    die("Erreur: ".$e->getMessage()); 
-}
+$conn = getDBConnection();
 
 // Récupération des techniciens
 $stmt = $conn->query("SELECT * FROM techniciens ORDER BY nom");
 $techniciens = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Récupération des fiches maintenance
-$stmt2 = $conn->query("SELECT m.*, t.nom, t.prenom FROM maintenance_fiches m 
-                       JOIN techniciens t ON m.technicien_id=t.id 
+$stmt2 = $conn->query("SELECT m.*, t.nom, t.prenom FROM maintenance_fiches m
+                       JOIN techniciens t ON m.technicien_id=t.id
                        ORDER BY m.date_maintenance DESC");
 $maintenances = $stmt2->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -25,6 +20,7 @@ $maintenances = $stmt2->fetchAll(PDO::FETCH_ASSOC);
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Techniciens & Maintenance - Genesis</title>
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
@@ -41,30 +37,31 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 .sidebar ul li.active a{background:#28a745;color:#fff;border-radius:5px;}
 .main-content{margin-left:240px;padding:80px 30px 30px 30px;transition:margin-left 0.3s ease;}
 .card{background:#fff;padding:15px;margin:10px;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.1);}
-.card img{width:80px;height:80px;border-radius:50%;margin-right:15px;display:inline-block;vertical-align:middle;}
+.card img{width:80px;height:80px;border-radius:50%;margin-right:15px;display:inline-block;vertical-align:middle;object-fit:cover;}
+.navbar-toggle{display:none;cursor:pointer;}
+.navbar-toggle .icon-bar{width:22px;height:2px;background:#28a745;margin:4px 0;transition:0.4s;}
+
+@media (max-width:768px){
+    .navbar-toggle{display:block;}
+    .sidebar{transform:translateX(-100%);width:200px;}
+    .sidebar.show{transform:translateX(0);}
+    .main-content{margin-left:0;padding:80px 15px 15px 15px;}
+}
 </style>
 </head>
 <body>
 
-<div class="navbar-top">
-<div class="brand"><i class="fa fa-leaf"></i> Genesis</div>
-<div class="buttons">
-<a href="logout.php" class="btn btn-danger"><i class="fa fa-sign-out"></i> Déconnexion</a>
-</div>
-</div>
-
-<div class="sidebar">
-<h2>Menu</h2>
-<ul>
-<li><a href="index.php"><i class="fa fa-home"></i> Accueil</a></li>
-<li class="active"><a href="ia.php"><i class="fa fa-android"></i> Techniciens</a></li>
-<li><a href="parametrage.php"><i class="fa fa-cog"></i> Paramétrage</a></li>
-<li><a href="historique.php"><i class="fa fa-history"></i> Historique</a></li>
-</ul>
-</div>
+<?php include __DIR__ . '/menu.php'; ?>
 
 <div class="main-content">
 <h2 class="text-success"><i class="fa fa-users"></i> Gestion des techniciens et maintenance</h2>
+
+<?php if(!empty($_SESSION['success'])): ?>
+<div class="alert alert-success"><?php echo e($_SESSION['success']); unset($_SESSION['success']); ?></div>
+<?php endif; ?>
+<?php if(!empty($_SESSION['error'])): ?>
+<div class="alert alert-danger"><?php echo e($_SESSION['error']); unset($_SESSION['error']); ?></div>
+<?php endif; ?>
 
 <!-- Onglets -->
 <ul class="nav nav-tabs">
@@ -81,13 +78,16 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 <?php foreach($techniciens as $t): ?>
 <div class="col-sm-6 col-md-4">
 <div class="card">
-<img src="<?= $t['photo'] ?? 'default.png' ?>" alt="Photo">
-<strong><?= $t['prenom'].' '.$t['nom'] ?></strong><br>
-<small><?= $t['role'] ?></small><br>
-<small>Email: <?= $t['email'] ?></small><br>
-<small>Téléphone: <?= $t['telephone'] ?></small><br><br>
-<button class="btn btn-primary btn-xs" onclick="editTech(<?= $t['id'] ?>)">Modifier</button>
-<button class="btn btn-danger btn-xs" onclick="deleteTech(<?= $t['id'] ?>)">Supprimer</button>
+<img src="<?php echo e($t['photo'] ?? 'default.png'); ?>" alt="Photo" onerror="this.src='default.png'">
+<strong><?php echo e($t['prenom'].' '.$t['nom']); ?></strong><br>
+<small><?php echo e($t['role']); ?></small><br>
+<small>Email: <?php echo e($t['email']); ?></small><br>
+<small>Téléphone: <?php echo e($t['telephone']); ?></small><br><br>
+<form method="post" action="delete_technicien.php" style="display:inline;" onsubmit="return confirm('Supprimer ce technicien ?');">
+    <?php echo csrfField(); ?>
+    <input type="hidden" name="id" value="<?php echo (int)$t['id']; ?>">
+    <button type="submit" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i> Supprimer</button>
+</form>
 </div>
 </div>
 <?php endforeach; ?>
@@ -104,10 +104,16 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 <tbody>
 <?php foreach($maintenances as $m): ?>
 <tr>
-<td><?= $m['date_maintenance'] ?></td>
-<td><?= $m['prenom'].' '.$m['nom'] ?></td>
-<td><?= $m['description'] ?></td>
-<td><a href="<?= $m['fichier'] ?>" target="_blank"><i class="fa fa-file-pdf-o"></i> Voir</a></td>
+<td><?php echo e($m['date_maintenance']); ?></td>
+<td><?php echo e($m['prenom'].' '.$m['nom']); ?></td>
+<td><?php echo e($m['description']); ?></td>
+<td>
+<?php if(!empty($m['fichier'])): ?>
+<a href="<?php echo e($m['fichier']); ?>" target="_blank" rel="noopener noreferrer"><i class="fa fa-file-pdf-o"></i> Voir</a>
+<?php else: ?>
+-
+<?php endif; ?>
+</td>
 </tr>
 <?php endforeach; ?>
 </tbody>
@@ -121,14 +127,18 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 <div class="modal-dialog">
 <div class="modal-content">
 <form method="post" action="save_technicien.php" enctype="multipart/form-data">
+<?php echo csrfField(); ?>
 <div class="modal-header"><h4>Ajouter Technicien</h4></div>
 <div class="modal-body">
-<div class="form-group"><label>Prénom:</label><input type="text" name="prenom" class="form-control" required></div>
-<div class="form-group"><label>Nom:</label><input type="text" name="nom" class="form-control" required></div>
-<div class="form-group"><label>Rôle:</label><input type="text" name="role" class="form-control" required></div>
-<div class="form-group"><label>Email:</label><input type="email" name="email" class="form-control"></div>
-<div class="form-group"><label>Téléphone:</label><input type="text" name="telephone" class="form-control"></div>
-<div class="form-group"><label>Photo:</label><input type="file" name="photo" class="form-control"></div>
+<div class="form-group"><label>Prénom:</label><input type="text" name="prenom" class="form-control" required maxlength="100"></div>
+<div class="form-group"><label>Nom:</label><input type="text" name="nom" class="form-control" required maxlength="100"></div>
+<div class="form-group"><label>Rôle:</label><input type="text" name="role" class="form-control" required maxlength="100"></div>
+<div class="form-group"><label>Email:</label><input type="email" name="email" class="form-control" maxlength="255"></div>
+<div class="form-group"><label>Téléphone:</label><input type="tel" name="telephone" class="form-control" maxlength="20" pattern="[0-9+\-\s]+"></div>
+<div class="form-group">
+    <label>Photo (JPG, PNG, GIF - max 5MB):</label>
+    <input type="file" name="photo" class="form-control" accept=".jpg,.jpeg,.png,.gif">
+</div>
 </div>
 <div class="modal-footer"><button type="submit" class="btn btn-success">Ajouter</button><button type="button" class="btn btn-default" data-dismiss="modal">Annuler</button></div>
 </form>
@@ -141,17 +151,19 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 <div class="modal-dialog">
 <div class="modal-content">
 <form method="post" action="save_fiche.php" enctype="multipart/form-data">
+<?php echo csrfField(); ?>
 <div class="modal-header"><h4>Ajouter Fiche de maintenance</h4></div>
 <div class="modal-body">
 <div class="form-group"><label>Technicien:</label>
 <select name="technicien_id" class="form-control" required>
+<option value="">-- Sélectionner --</option>
 <?php foreach($techniciens as $t): ?>
-<option value="<?= $t['id'] ?>"><?= $t['prenom'].' '.$t['nom'] ?></option>
+<option value="<?php echo (int)$t['id']; ?>"><?php echo e($t['prenom'].' '.$t['nom']); ?></option>
 <?php endforeach; ?>
 </select></div>
 <div class="form-group"><label>Date:</label><input type="datetime-local" name="date_maintenance" class="form-control" required></div>
-<div class="form-group"><label>Description:</label><textarea name="description" class="form-control"></textarea></div>
-<div class="form-group"><label>Fichier PDF:</label><input type="file" name="fichier" class="form-control" accept=".pdf"></div>
+<div class="form-group"><label>Description:</label><textarea name="description" class="form-control" maxlength="1000"></textarea></div>
+<div class="form-group"><label>Fichier PDF (max 5MB):</label><input type="file" name="fichier" class="form-control" accept=".pdf"></div>
 </div>
 <div class="modal-footer"><button type="submit" class="btn btn-success">Ajouter</button><button type="button" class="btn btn-default" data-dismiss="modal">Annuler</button></div>
 </form>
@@ -162,8 +174,12 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
 <script>
-function editTech(id){ alert('Fonction modifier technicien ID '+id); /* À compléter avec modal */ }
-function deleteTech(id){ if(confirm('Supprimer ce technicien ?')){ window.location='delete_technicien.php?id='+id; } }
+// Toggle sidebar mobile
+const toggleBtn = document.getElementById('toggleSidebar');
+const sidebar = document.getElementById('sidebar');
+if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener('click', () => { sidebar.classList.toggle('show'); });
+}
 </script>
 </body>
 </html>

@@ -1,7 +1,14 @@
+<?php
+/**
+ * Dashboard principal - GENESIS
+ */
+require_once __DIR__ . '/auth_check.php';
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Genesis - Tableau de Bord</title>
 
 	<!-- Bootstrap et FontAwesome -->
@@ -104,13 +111,18 @@
 			padding: 80px 30px 30px 30px;
 			transition: margin-left 0.3s ease;
 		}
-		iframe { 
-			width: 100%; 
-			height: 450px; 
-			margin-bottom: 20px; 
+		iframe {
+			width: 100%;
+			height: 450px;
+			margin-bottom: 20px;
 			border: none;
 			border-radius: 10px;
 			box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+		}
+
+		.user-info {
+			color: #666;
+			margin-right: 15px;
 		}
 
 		/* ===== RESPONSIVE ===== */
@@ -147,37 +159,29 @@
 			<div class="icon-bar"></div>
 		</div>
 		<div class="buttons">
-			<form class="form-inline" method="post" action="excel.php" style="display:inline;" id="downloadForm">
-				<button type="submit" name="generate_pdf" class="btn btn-success">
-					<i class="fa fa-file--o">Reinitialisation de la base</i> 
-				</button>
-				<span id="loadingSpinner" class="glyphicon glyphicon-refresh glyphicon-spin"></span>
-			</form>
-			<a href="logout.php" class="btn btn-danger"><i class="fa fa-sign-out"></i> Déconnexion</a>
+			<span class="user-info hidden-xs">
+				<i class="fa fa-user"></i> <?php echo e($_SESSION['username']); ?>
+			</span>
+			<a href="excel.php" class="btn btn-success" onclick="return confirm('Voulez-vous vraiment exporter et réinitialiser la base de données ?');">
+				<i class="fa fa-database"></i> <span class="hidden-xs">Export &amp; Reset</span>
+			</a>
+			<a href="logout.php" class="btn btn-danger"><i class="fa fa-sign-out"></i> <span class="hidden-xs">Déconnexion</span></a>
 		</div>
 	</div>
 
 	<!-- ===== SIDEBAR ===== -->
-	<div class="sidebar" id="sidebar">
-		<h2>Menu</h2>
-		<ul>
-			<li class="active"><a href="#"><i class="fa fa-home"></i> Accueil</a></li>
-			<li><a href="parametrage.php"><i class="fa fa-cog"></i> Paramétrage</a></li>
-			<li><a href="historique.php"><i class="fa fa-history"></i> Historique</a></li>
-			<li><a href="ia.php"><i class="fa fa-android"></i> Assistant IA</a></li>
-		</ul>
-	</div>
+	<?php include __DIR__ . '/menu.php'; ?>
 
 	<!-- ===== CONTENU PRINCIPAL ===== -->
 	<div class="main-content">
 		<h3 class="text-success"><i class="fa fa-line-chart"></i> Données en temps réel</h3>
 		<hr>
-		<iframe src="grafique_temperature.php"></iframe>
-		<iframe src="grafique_humidite.php"></iframe>
-		<iframe src="grafique_lumiere.php"></iframe>
-		<iframe src="grafique_eau.php"></iframe>
-		<iframe src="grafique_co2.php"></iframe>
-		<iframe src="grafique_arrosage.php"></iframe>
+		<iframe src="grafique_temperature.php" title="Graphique température"></iframe>
+		<iframe src="grafique_humidite.php" title="Graphique humidité"></iframe>
+		<iframe src="grafique_lumiere.php" title="Graphique lumière"></iframe>
+		<iframe src="grafique_eau.php" title="Graphique niveau d'eau"></iframe>
+		<iframe src="grafique_co2.php" title="Graphique CO2"></iframe>
+		<iframe src="grafique_arrosage.php" title="Graphique arrosage"></iframe>
 	</div>
 
 	<!-- ===== JS ===== -->
@@ -189,12 +193,6 @@
 		const sidebar = document.getElementById('sidebar');
 		toggleBtn.addEventListener('click', () => {
 			sidebar.classList.toggle('show');
-		});
-
-		// Affiche spinner téléchargement
-		$('#downloadForm').on('submit', function() {
-			$('#loadingSpinner').show();
-			setTimeout(() => $('#loadingSpinner').hide(), 3000);
 		});
 	</script>
 

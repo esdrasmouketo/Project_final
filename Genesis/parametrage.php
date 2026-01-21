@@ -1,32 +1,103 @@
 <?php
-session_start();
+/**
+ * Page de paramétrage sécurisée - GENESIS
+ */
+require_once __DIR__ . '/auth_check.php';
 
-// =====================
-// Connexion à la base
-// =====================
-$host = 'localhost';
-$db   = 'ardbd';
-$user = 'root';
-$pass = '';
-$charset = 'utf8mb4';
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$conn = getDBConnection();
 
-try {
-    $conn = new PDO($dsn, $user, $pass);
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die('Erreur de connexion : ' . $e->getMessage());
+// Traitement du formulaire POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Vérifier le token CSRF
+    if (!isset($_POST[CSRF_TOKEN_NAME]) || !verifyCSRFToken($_POST[CSRF_TOKEN_NAME])) {
+        $_SESSION['error'] = "Erreur de sécurité. Veuillez réessayer.";
+        header('Location: parametrage.php');
+        exit();
+    }
+
+    try {
+        // Déterminer quel formulaire a été soumis et traiter les données
+        $updates = [];
+
+        // Récupérer les paramètres actuels pour l'historique
+        $currentStmt = $conn->query("SELECT * FROM table_parametres LIMIT 1");
+        $current = $currentStmt->fetch(PDO::FETCH_ASSOC) ?? [];
+
+        // Seuils
+        if (isset($_POST['temp_max'])) {
+            $temp_max = filter_var($_POST['temp_max'], FILTER_VALIDATE_FLOAT);
+            $humidity_min = filter_var($_POST['humidity_min'], FILTER_VALIDATE_FLOAT);
+            $eau_min = filter_var($_POST['eau_min'], FILTER_VALIDATE_FLOAT);
+            $co2_max = filter_var($_POST['co2_max'], FILTER_VALIDATE_FLOAT);
+
+            if ($temp_max !== false) $updates['temp_max'] = $temp_max;
+            if ($humidity_min !== false) $updates['humidity_min'] = $humidity_min;
+            if ($eau_min !== false) $updates['eau_min'] = $eau_min;
+            if ($co2_max !== false) $updates['co2_max'] = $co2_max;
+        }
+
+        // Équipements
+        if (isset($_POST['pompe'])) {
+            $pompe = in_array($_POST['pompe'], ['auto', 'manuel']) ? $_POST['pompe'] : 'auto';
+            $electrovanne = in_array($_POST['electrovanne'], ['auto', 'manuel']) ? $_POST['electrovanne'] : 'auto';
+            $updates['pompe'] = $pompe;
+            $updates['electrovanne'] = $electrovanne;
+        }
+
+        // Notifications
+        if (isset($_POST['notifications_form']) && $_POST['notifications_form'] === '1') {
+            $updates['alert_email'] = isset($_POST['alert_email']) ? 1 : 0;
+            $updates['alert_sms'] = isset($_POST['alert_sms']) ? 1 : 0;
+        }
+
+        // Horaires
+        if (isset($_POST['heure_debut'])) {
+            $heure_debut = preg_match('/^\d{2}:\d{2}$/', $_POST['heure_debut']) ? $_POST['heure_debut'] : '06:00';
+            $heure_fin = preg_match('/^\d{2}:\d{2}$/', $_POST['heure_fin']) ? $_POST['heure_fin'] : '18:00';
+            $updates['heure_debut'] = $heure_debut;
+            $updates['heure_fin'] = $heure_fin;
+        }
+
+        if (!empty($updates)) {
+            // Construire la requête UPDATE
+            $setParts = [];
+            $values = [];
+            foreach ($updates as $key => $value) {
+                $setParts[] = "$key = ?";
+                $values[] = $value;
+
+                // Enregistrer dans l'historique
+                $oldValue = $current[$key] ?? 'N/A';
+                if ($oldValue != $value) {
+                    $histStmt = $conn->prepare("INSERT INTO historique_parametres (param, ancienne_valeur, nouvelle_valeur, utilisateur) VALUES (?, ?, ?, ?)");
+                    $histStmt->execute([$key, (string)$oldValue, (string)$value, $_SESSION['username']]);
+                }
+            }
+
+            $sql = "UPDATE table_parametres SET " . implode(', ', $setParts);
+            $stmt = $conn->prepare($sql);
+            $stmt->execute($values);
+
+            $_SESSION['success'] = "Paramètres enregistrés avec succès.";
+        }
+
+        // Régénérer le token CSRF
+        regenerateCSRFToken();
+
+    } catch (PDOException $e) {
+        error_log("Erreur parametrage: " . $e->getMessage());
+        $_SESSION['error'] = "Erreur lors de l'enregistrement.";
+    }
+
+    header('Location: parametrage.php');
+    exit();
 }
 
-// =====================
 // Récupération des paramètres
-// =====================
 $stmt = $conn->query("SELECT * FROM table_parametres LIMIT 1");
 $parametres = $stmt->fetch(PDO::FETCH_ASSOC) ?? [];
 
-// =====================
 // Historique des modifications
-// =====================
 $historyStmt = $conn->query("SELECT * FROM historique_parametres ORDER BY date_modif DESC LIMIT 10");
 $history = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -34,6 +105,7 @@ $history = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Paramétrage - Genesis</title>
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
@@ -75,10 +147,10 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 
 <!-- Affichage messages -->
 <?php if(!empty($_SESSION['success'])): ?>
-<div class="alert alert-success"><?= $_SESSION['success']; unset($_SESSION['success']); ?></div>
+<div class="alert alert-success"><?php echo e($_SESSION['success']); unset($_SESSION['success']); ?></div>
 <?php endif; ?>
 <?php if(!empty($_SESSION['error'])): ?>
-<div class="alert alert-danger"><?= $_SESSION['error']; unset($_SESSION['error']); ?></div>
+<div class="alert alert-danger"><?php echo e($_SESSION['error']); unset($_SESSION['error']); ?></div>
 <?php endif; ?>
 
 <!-- ===== NAV TABS ===== -->
@@ -95,21 +167,22 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 <!-- SEUILS -->
 <div class="tab-pane fade in active" id="seuils">
 <form method="post" action="parametrage.php" class="form-horizontal">
+    <?php echo csrfField(); ?>
     <div class="form-group">
         <label class="col-sm-2 control-label">Température max (°C)</label>
-        <div class="col-sm-4"><input type="number" name="temp_max" class="form-control" value="<?= $parametres['temp_max'] ?? 30 ?>"></div>
+        <div class="col-sm-4"><input type="number" name="temp_max" class="form-control" value="<?php echo e($parametres['temp_max'] ?? 30); ?>" min="0" max="100" step="0.1"></div>
     </div>
     <div class="form-group">
         <label class="col-sm-2 control-label">Humidité min (%)</label>
-        <div class="col-sm-4"><input type="number" name="humidity_min" class="form-control" value="<?= $parametres['humidity_min'] ?? 30 ?>"></div>
+        <div class="col-sm-4"><input type="number" name="humidity_min" class="form-control" value="<?php echo e($parametres['humidity_min'] ?? 30); ?>" min="0" max="100" step="0.1"></div>
     </div>
     <div class="form-group">
         <label class="col-sm-2 control-label">Niveau d'eau min (L)</label>
-        <div class="col-sm-4"><input type="number" name="eau_min" class="form-control" value="<?= $parametres['eau_min'] ?? 20 ?>"></div>
+        <div class="col-sm-4"><input type="number" name="eau_min" class="form-control" value="<?php echo e($parametres['eau_min'] ?? 20); ?>" min="0" max="1000" step="0.1"></div>
     </div>
     <div class="form-group">
         <label class="col-sm-2 control-label">CO₂ max (ppm)</label>
-        <div class="col-sm-4"><input type="number" name="co2_max" class="form-control" value="<?= $parametres['co2_max'] ?? 800 ?>"></div>
+        <div class="col-sm-4"><input type="number" name="co2_max" class="form-control" value="<?php echo e($parametres['co2_max'] ?? 800); ?>" min="0" max="5000" step="1"></div>
     </div>
     <div class="form-group">
         <div class="col-sm-offset-2 col-sm-4"><button type="submit" class="btn btn-success"><i class="fa fa-save"></i> Enregistrer</button></div>
@@ -120,12 +193,13 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 <!-- ARROSAGE / EQUIPEMENTS -->
 <div class="tab-pane fade" id="equipements">
 <form method="post" action="parametrage.php" class="form-horizontal">
+    <?php echo csrfField(); ?>
     <div class="form-group">
         <label class="col-sm-2 control-label">Pompe</label>
         <div class="col-sm-4">
             <select name="pompe" class="form-control">
-                <option value="auto" <?= ($parametres['pompe']??'auto')=='auto'?'selected':'' ?>>Automatique</option>
-                <option value="manuel" <?= ($parametres['pompe']??'auto')=='manuel'?'selected':'' ?>>Manuel</option>
+                <option value="auto" <?php echo ($parametres['pompe']??'auto')=='auto'?'selected':''; ?>>Automatique</option>
+                <option value="manuel" <?php echo ($parametres['pompe']??'auto')=='manuel'?'selected':''; ?>>Manuel</option>
             </select>
         </div>
     </div>
@@ -133,8 +207,8 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
         <label class="col-sm-2 control-label">Électrovanne</label>
         <div class="col-sm-4">
             <select name="electrovanne" class="form-control">
-                <option value="auto" <?= ($parametres['electrovanne']??'auto')=='auto'?'selected':'' ?>>Automatique</option>
-                <option value="manuel" <?= ($parametres['electrovanne']??'auto')=='manuel'?'selected':'' ?>>Manuel</option>
+                <option value="auto" <?php echo ($parametres['electrovanne']??'auto')=='auto'?'selected':''; ?>>Automatique</option>
+                <option value="manuel" <?php echo ($parametres['electrovanne']??'auto')=='manuel'?'selected':''; ?>>Manuel</option>
             </select>
         </div>
     </div>
@@ -147,13 +221,15 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 <!-- NOTIFICATIONS -->
 <div class="tab-pane fade" id="notifications">
 <form method="post" action="parametrage.php" class="form-horizontal">
+    <?php echo csrfField(); ?>
+    <input type="hidden" name="notifications_form" value="1">
     <div class="form-group">
         <label class="col-sm-2 control-label">Alertes Email</label>
-        <div class="col-sm-4"><input type="checkbox" name="alert_email" <?= !empty($parametres['alert_email'])?'checked':'' ?>></div>
+        <div class="col-sm-4"><input type="checkbox" name="alert_email" <?php echo !empty($parametres['alert_email'])?'checked':''; ?>></div>
     </div>
     <div class="form-group">
         <label class="col-sm-2 control-label">Alertes SMS</label>
-        <div class="col-sm-4"><input type="checkbox" name="alert_sms" <?= !empty($parametres['alert_sms'])?'checked':'' ?>></div>
+        <div class="col-sm-4"><input type="checkbox" name="alert_sms" <?php echo !empty($parametres['alert_sms'])?'checked':''; ?>></div>
     </div>
     <div class="form-group">
         <div class="col-sm-offset-2 col-sm-4"><button type="submit" class="btn btn-success"><i class="fa fa-save"></i> Enregistrer</button></div>
@@ -164,23 +240,36 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 <!-- CONTRÔLE MANUEL -->
 <div class="tab-pane fade" id="actionneur">
 <h4>Commandes manuelles</h4>
-<button class="btn btn-primary" onclick="sendAction('pompe_on')">Pompe ON</button>
-<button class="btn btn-danger" onclick="sendAction('pompe_off')">Pompe OFF</button>
-<button class="btn btn-primary" onclick="sendAction('electrovanne_open')">Électrovanne ON</button>
-<button class="btn btn-danger" onclick="sendAction('electrovanne_close')">Électrovanne OFF</button>
-<button class="btn btn-warning" onclick="sendAction('light_on')">Lumière ON</button>
-<button class="btn btn-default" onclick="sendAction('light_off')">Lumière OFF</button>
+<p class="text-muted">Contrôlez les équipements de la serre en temps réel.</p>
+<div class="btn-group-vertical" style="margin-bottom: 10px;">
+    <button class="btn btn-primary" onclick="sendAction('pompe_on')"><i class="fa fa-tint"></i> Pompe ON</button>
+    <button class="btn btn-danger" onclick="sendAction('pompe_off')"><i class="fa fa-tint"></i> Pompe OFF</button>
+</div>
+<div class="btn-group-vertical" style="margin-bottom: 10px;">
+    <button class="btn btn-primary" onclick="sendAction('electrovanne_open')"><i class="fa fa-plug"></i> Électrovanne ON</button>
+    <button class="btn btn-danger" onclick="sendAction('electrovanne_close')"><i class="fa fa-plug"></i> Électrovanne OFF</button>
+</div>
+<div class="btn-group-vertical">
+    <button class="btn btn-warning" onclick="sendAction('light_on')"><i class="fa fa-lightbulb-o"></i> Lumière ON</button>
+    <button class="btn btn-default" onclick="sendAction('light_off')"><i class="fa fa-lightbulb-o"></i> Lumière OFF</button>
+</div>
+<div id="actionResult" class="alert" style="display:none; margin-top:15px;"></div>
 </div>
 
 <!-- PROGRAMMATION HORAIRE -->
 <div class="tab-pane fade" id="horaire">
 <h4>Définir heures LED / Arrosage</h4>
 <form method="post" action="parametrage.php" class="form-inline">
-    <label>Heure début:</label>
-    <input type="time" name="heure_debut" class="form-control" value="<?= $parametres['heure_debut'] ?? '06:00' ?>">
-    <label>Heure fin:</label>
-    <input type="time" name="heure_fin" class="form-control" value="<?= $parametres['heure_fin'] ?? '18:00' ?>">
-    <button type="submit" class="btn btn-success">Enregistrer</button>
+    <?php echo csrfField(); ?>
+    <div class="form-group">
+        <label>Heure début:</label>
+        <input type="time" name="heure_debut" class="form-control" value="<?php echo e($parametres['heure_debut'] ?? '06:00'); ?>">
+    </div>
+    <div class="form-group">
+        <label>Heure fin:</label>
+        <input type="time" name="heure_fin" class="form-control" value="<?php echo e($parametres['heure_fin'] ?? '18:00'); ?>">
+    </div>
+    <button type="submit" class="btn btn-success"><i class="fa fa-save"></i> Enregistrer</button>
 </form>
 </div>
 
@@ -199,11 +288,11 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
     <tbody>
         <?php foreach($history as $h): ?>
         <tr>
-            <td><?= $h['date_modif'] ?></td>
-            <td><?= $h['param'] ?></td>
-            <td><?= $h['ancienne_valeur'] ?></td>
-            <td><?= $h['nouvelle_valeur'] ?></td>
-            <td><?= $h['utilisateur'] ?></td>
+            <td><?php echo e($h['date_modif']); ?></td>
+            <td><?php echo e($h['param']); ?></td>
+            <td><?php echo e($h['ancienne_valeur']); ?></td>
+            <td><?php echo e($h['nouvelle_valeur']); ?></td>
+            <td><?php echo e($h['utilisateur']); ?></td>
         </tr>
         <?php endforeach; ?>
     </tbody>
@@ -219,13 +308,38 @@ body { font-family:'Helvetica Neue', Arial, sans-serif; margin:0; padding:0; bac
 // Toggle sidebar mobile
 const toggleBtn = document.getElementById('toggleSidebar');
 const sidebar = document.getElementById('sidebar');
-toggleBtn.addEventListener('click', () => { sidebar.classList.toggle('show'); });
+if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener('click', () => { sidebar.classList.toggle('show'); });
+}
 
-// Commandes manuelles actionneur
+// Commandes manuelles actionneur avec token CSRF
 function sendAction(action){
-    $.post('actionneur.php', {action: action}, function(data){
-        alert(data.message);
-    }, 'json');
+    const csrfToken = '<?php echo generateCSRFToken(); ?>';
+    const resultDiv = $('#actionResult');
+
+    $.ajax({
+        url: 'actionneur.php',
+        type: 'POST',
+        data: {
+            action: action,
+            <?php echo CSRF_TOKEN_NAME; ?>: csrfToken
+        },
+        dataType: 'json',
+        success: function(data) {
+            resultDiv.removeClass('alert-success alert-danger');
+            if (data.success) {
+                resultDiv.addClass('alert-success').text(data.message).show();
+            } else {
+                resultDiv.addClass('alert-danger').text(data.message || 'Erreur').show();
+            }
+            setTimeout(() => resultDiv.fadeOut(), 3000);
+        },
+        error: function() {
+            resultDiv.removeClass('alert-success').addClass('alert-danger')
+                     .text('Erreur de communication avec le serveur').show();
+            setTimeout(() => resultDiv.fadeOut(), 3000);
+        }
+    });
 }
 </script>
 
