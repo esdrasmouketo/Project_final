@@ -68,7 +68,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $conn = getDBConnection();
 
                     // Requête préparée pour récupérer l'utilisateur
-                    $stmt = $conn->prepare("SELECT id, mot_de_passe FROM agent WHERE id = ?");
+                    $stmt = $conn->prepare("SELECT id, email, mot_de_passe FROM techniciens WHERE email = ?");
                     $stmt->execute([$username]);
                     $row = $stmt->fetch();
 
@@ -85,16 +85,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                             // Migrer automatiquement vers bcrypt
                             $hashed = password_hash($password, PASSWORD_DEFAULT);
-                            $updateStmt = $conn->prepare("UPDATE agent SET mot_de_passe = ? WHERE id = ?");
-                            $updateStmt->execute([$hashed, $username]);
+                            $updateStmt = $conn->prepare("UPDATE techniciens SET mot_de_passe = ? WHERE id = ?");
+                            $updateStmt->execute([$hashed, $row['id']]);
                         } elseif ($password === $row['mot_de_passe']) {
                             // Mot de passe en clair (migration nécessaire)
                             $login_success = true;
 
                             // Migrer automatiquement vers bcrypt
                             $hashed = password_hash($password, PASSWORD_DEFAULT);
-                            $updateStmt = $conn->prepare("UPDATE agent SET mot_de_passe = ? WHERE id = ?");
-                            $updateStmt->execute([$hashed, $username]);
+                            $updateStmt = $conn->prepare("UPDATE techniciens SET mot_de_passe = ? WHERE id = ?");
+                            $updateStmt->execute([$hashed, $row['id']]);
                         }
                     }
 
@@ -103,7 +103,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         session_regenerate_id(true);
 
                         // Stocker les informations de session
-                        $_SESSION['username'] = $username;
+                        $_SESSION['user_id'] = $row['id'];
+                        $_SESSION['username'] = $row['email'];
                         $_SESSION['user_ip'] = $_SERVER['REMOTE_ADDR'];
                         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'];
                         $_SESSION['last_activity'] = time();

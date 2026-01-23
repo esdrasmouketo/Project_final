@@ -30,7 +30,7 @@ try {
     $conn = getDBConnection();
 
     // Récupérer tous les utilisateurs
-    $stmt = $conn->query("SELECT id, mot_de_passe FROM agent");
+    $stmt = $conn->query("SELECT id, mot_de_passe FROM techniciens");
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (empty($users)) {
@@ -65,7 +65,8 @@ try {
         }
 
         // Mettre à jour le mot de passe
-        $updateStmt = $conn->prepare("UPDATE agent SET mot_de_passe = ? WHERE id = ?");
+        $updateStmt = $conn->prepare("UPDATE techniciens SET mot_de_passe = ? WHERE id = ?");
+
         if ($updateStmt->execute([$hashed, $id])) {
             echo "[$id] Migré avec succès\n";
             $migrated++;
