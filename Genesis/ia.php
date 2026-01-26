@@ -170,41 +170,6 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 </div>
 </div>
 </div>
-<!-- Formulaire de réinitialisation de mot de passe -->
-<div class="panel panel-warning">
-    <div class="panel-heading">
-        <h3 class="panel-title">
-            <i class="fa fa-key"></i> Réinitialiser mot de passe
-        </h3>
-    </div>
-    <div class="panel-body">
-        <form method="post" action="reset_password.php">
-            <?php echo csrfField(); ?>
-            
-            <div class="form-group">
-                <label for="reset_email">Email de l'utilisateur :</label>
-                <input type="email" class="form-control" id="reset_email" 
-                       name="email" required>
-            </div>
-
-            <div class="form-group">
-                <label for="new_password">Nouveau mot de passe :</label>
-                <input type="password" class="form-control" id="new_password" 
-                       name="new_password" required minlength="6">
-            </div>
-
-            <div class="form-group">
-                <label for="confirm_password">Confirmer le mot de passe :</label>
-                <input type="password" class="form-control" id="confirm_password" 
-                       name="confirm_password" required minlength="6">
-            </div>
-
-            <button type="submit" class="btn btn-warning">
-                <i class="fa fa-refresh"></i> Réinitialiser
-            </button>
-        </form>
-    </div>
-</div>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
 <script>
