@@ -23,6 +23,17 @@ function drift($value, $step) {
     return $value + rand(-$step * 10, $step * 10) / 10;
 }
 
+function calculerAjustement($temperature) {
+    $tempEntiere = intval($temperature);
+    if ($tempEntiere < 10) {
+        return 40;
+    }
+    if ($tempEntiere % 2 == 0) {
+        return 130;
+    }
+    return 150;
+}
+
 // ================== TEMPS ==================
 $heure = date("G"); // heure courante (0-23)
 
@@ -34,6 +45,9 @@ if ($heure >= 6 && $heure <= 18) {
     $lumiere = rand(10, 80);   // nuit
     $temperature = rand(200, 250) / 10;
 }
+
+// ================== AJUSTEMENT TEMPÉRATURE ==================
+$ajustement = calculerAjustement($temperature);
 
 // ================== CO2 (photosynthèse) ==================
 $co2 = ($lumiere > 400)
@@ -93,6 +107,7 @@ echo "<ul>
 <li>CO₂ : {$co2} ppm</li>
 <li>Niveau d’eau : {$niveau_eau} %</li>
 <li>Arrosage : " . ($arrosage ? "ACTIF" : "INACTIF") . "</li>
+<li>Ajustement température : +{$ajustement} (base entière : " . intval($temperature) . ")</li>
 </ul>";
 
 $stmt->close();
