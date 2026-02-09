@@ -239,22 +239,29 @@ $ajust_arrosage   = calculerAjustement($arrosage);     // Ajustement pour l'arro
 $ajust_co2        = calculerAjustement($co2);          // Ajustement pour le CO2
 
 // ================== INSERTION EN BASE DE DONNEES ==================
-// Prepare une requete securisee (prepared statement) pour inserer les donnees des capteurs
+// Prepare une requete securisee (prepared statement) pour inserer les donnees des capteurs + ajustements
 $stmt = $conn->prepare("
 INSERT INTO table_capteurs
-(niveau_eau, niveau_lumiere, arrosage, co2_level, temperature, humidity)
-VALUES (?, ?, ?, ?, ?, ?)
+(niveau_eau, niveau_lumiere, arrosage, co2_level, temperature, humidity,
+ ajust_temperature, ajust_humidite, ajust_lumiere, ajust_eau, ajust_arrosage, ajust_co2)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ");
 
-// Lie les parametres : "dddddd" = 6 valeurs de type double (float)
+// Lie les parametres : "dddddd" = 6 doubles (capteurs) + "iiiiii" = 6 entiers (ajustements)
 $stmt->bind_param(
-    "dddddd",
-    $niveau_eau,   // Parametre 1 : niveau d'eau
-    $lumiere,      // Parametre 2 : niveau de lumiere
-    $arrosage,     // Parametre 3 : statut arrosage (0 ou 1)
-    $co2,          // Parametre 4 : niveau de CO2
-    $temperature,  // Parametre 5 : temperature
-    $humidity      // Parametre 6 : humidite
+    "ddddddiiiiii",
+    $niveau_eau,        // Parametre 1 : niveau d'eau
+    $lumiere,           // Parametre 2 : niveau de lumiere
+    $arrosage,          // Parametre 3 : statut arrosage (0 ou 1)
+    $co2,               // Parametre 4 : niveau de CO2
+    $temperature,       // Parametre 5 : temperature
+    $humidity,          // Parametre 6 : humidite
+    $ajust_temperature, // Parametre 7 : ajustement temperature
+    $ajust_humidite,    // Parametre 8 : ajustement humidite
+    $ajust_lumiere,     // Parametre 9 : ajustement lumiere
+    $ajust_eau,         // Parametre 10 : ajustement niveau d'eau
+    $ajust_arrosage,    // Parametre 11 : ajustement arrosage
+    $ajust_co2          // Parametre 12 : ajustement CO2
 );
 
 // Execute l'insertion dans la base de donnees
