@@ -265,7 +265,12 @@ $stmt->bind_param(
 );
 
 // Execute l'insertion dans la base de donnees
-$stmt->execute();
+if (!$stmt->execute()) {
+    echo "<p style='color:red;font-weight:bold;'>ERREUR INSERT : " . $stmt->error . "</p>";
+}
+if ($conn->error) {
+    echo "<p style='color:red;font-weight:bold;'>ERREUR MySQL : " . $conn->error . "</p>";
+}
 
 // ================== AFFICHAGE HTML ==================
 
