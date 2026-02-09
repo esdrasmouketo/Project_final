@@ -9,7 +9,7 @@
 
 <?php
 // ================== CONNEXION BDD ==================
-$conn = new mysqli("localhost", "root", "", "ardbd");
+$conn = new mysqli("localhost", "root", "passer", "ardbd");
 if ($conn->connect_error) {
     die("Erreur de connexion : " . $conn->connect_error);
 }
@@ -23,12 +23,12 @@ function drift($value, $step) {
     return $value + rand(-$step * 10, $step * 10) / 10;
 }
 
-function calculerAjustement($temperature) {
-    $tempEntiere = intval($temperature);
-    if ($tempEntiere < 10) {
+function calculerAjustement($valeur) {
+    $entier = intval($valeur);
+    if ($entier < 10) {
         return 40;
     }
-    if ($tempEntiere % 2 == 0) {
+    if ($entier % 2 == 0) {
         return 130;
     }
     return 150;
@@ -47,7 +47,7 @@ if ($heure >= 6 && $heure <= 18) {
 }
 
 // ================== AJUSTEMENT TEMPÉRATURE ==================
-$ajustement = calculerAjustement($temperature);
+$ajust_temperature = calculerAjustement($temperature);
 
 // ================== CO2 (photosynthèse) ==================
 $co2 = ($lumiere > 400)
@@ -78,6 +78,13 @@ if ($humidity < 55 && $niveau_eau > 15) {
 $humidity   = clamp($humidity, 40, 95);
 $niveau_eau = clamp($niveau_eau, 0, 100);
 
+// ================== AJUSTEMENTS CAPTEURS ==================
+$ajust_humidite   = calculerAjustement($humidity);
+$ajust_lumiere    = calculerAjustement($lumiere);
+$ajust_eau        = calculerAjustement($niveau_eau);
+$ajust_arrosage   = calculerAjustement($arrosage);
+$ajust_co2        = calculerAjustement($co2);
+
 // ================== INSERTION ==================
 $stmt = $conn->prepare("
 INSERT INTO table_capteurs
@@ -107,8 +114,18 @@ echo "<ul>
 <li>CO₂ : {$co2} ppm</li>
 <li>Niveau d’eau : {$niveau_eau} %</li>
 <li>Arrosage : " . ($arrosage ? "ACTIF" : "INACTIF") . "</li>
-<li>Ajustement température : +{$ajustement} (base entière : " . intval($temperature) . ")</li>
 </ul>";
+
+echo "<h3>Ajustements par capteur</h3>";
+echo "<table border='1' cellpadding='5' cellspacing='0'>
+<tr><th>Capteur</th><th>Valeur</th><th>Base entière</th><th>Ajustement</th></tr>
+<tr><td>Température</td><td>{$temperature} °C</td><td>" . intval($temperature) . "</td><td>+{$ajust_temperature}</td></tr>
+<tr><td>Humidité</td><td>{$humidity} %</td><td>" . intval($humidity) . "</td><td>+{$ajust_humidite}</td></tr>
+<tr><td>Lumière</td><td>{$lumiere} lux</td><td>" . intval($lumiere) . "</td><td>+{$ajust_lumiere}</td></tr>
+<tr><td>Niveau d'eau</td><td>{$niveau_eau} %</td><td>" . intval($niveau_eau) . "</td><td>+{$ajust_eau}</td></tr>
+<tr><td>Arrosage</td><td>" . ($arrosage ? "ACTIF (1)" : "INACTIF (0)") . "</td><td>{$arrosage}</td><td>+{$ajust_arrosage}</td></tr>
+<tr><td>CO₂</td><td>{$co2} ppm</td><td>" . intval($co2) . "</td><td>+{$ajust_co2}</td></tr>
+</table>";
 
 $stmt->close();
 $conn->close();
