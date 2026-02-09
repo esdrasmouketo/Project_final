@@ -11,7 +11,7 @@
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'ardbd');
 define('DB_USER', 'root');
-define('DB_PASS', 'passer'); // En production: utiliser getenv('DB_PASS')
+define('DB_PASS', ''); // En production: utiliser getenv('DB_PASS')
 define('DB_CHARSET', 'utf8mb4');
 
 // =============================================
