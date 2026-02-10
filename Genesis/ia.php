@@ -171,7 +171,7 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f8f9fa;margin:0;p
 </div>
 </div>
 <!-- Formulaire de réinitialisation de mot de passe -->
-<div class="panel panel-warning">
+<!-- <div class="panel panel-warning"> -->
     <div class="panel-heading">
         <h3 class="panel-title">
             <i class="fa fa-key"></i> Réinitialiser mot de passe
