@@ -216,14 +216,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <div class="form-group">
                 <label for="username"><i class="fa fa-user"></i> Nom d'utilisateur</label>
                 <input type="text" class="form-control" id="username" name="username"
-                       required autocomplete="username" maxlength="50"
-                       value="<?php echo e($_POST['username'] ?? ''); ?>">
+                       required autocomplete="off" maxlength="50"
+                       value="">
             </div>
 
             <div class="form-group">
                 <label for="password"><i class="fa fa-lock"></i> Mot de passe</label>
                 <input type="password" class="form-control" id="password" name="password"
-                       required autocomplete="current-password" maxlength="255">
+                       required autocomplete="new-password" maxlength="255">
             </div>
 
             <button type="submit" class="btn btn-success">

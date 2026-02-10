@@ -265,11 +265,12 @@ $stmt->bind_param(
 );
 
 // Execute l'insertion dans la base de donnees
-if (!$stmt->execute()) {
+if (!$stmt) {
+    echo "<p style='color:red;font-weight:bold;'>ERREUR PREPARE : " . $conn->error . "</p>";
+} elseif (!$stmt->execute()) {
     echo "<p style='color:red;font-weight:bold;'>ERREUR INSERT : " . $stmt->error . "</p>";
-}
-if ($conn->error) {
-    echo "<p style='color:red;font-weight:bold;'>ERREUR MySQL : " . $conn->error . "</p>";
+} else {
+    echo "<p style='color:green;font-weight:bold;'>INSERT OK - ID : " . $conn->insert_id . "</p>";
 }
 
 // ================== AFFICHAGE HTML ==================
