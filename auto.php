@@ -191,8 +191,8 @@ if ($heure >= 6 && $heure <= 18) {
 }
 
 // ================== AJUSTEMENT TEMPERATURE ==================
-// Calcule l'ajustement pour la temperature generee
-$ajust_temperature = calculerAjustement($temperature);
+// Temperature + ajustement selon la regle (pair: +130, impair: +150, <10: +40)
+$ajust_temperature = $temperature + calculerAjustement($temperature);
 
 // ================== CO2 (photosynthese) ==================
 // Si lumiere > 400 lux (jour) : la plante absorbe le CO2 (380-420 ppm)
@@ -231,12 +231,12 @@ $humidity   = clamp($humidity, 40, 95);   // Humidite entre 40% et 95%
 $niveau_eau = clamp($niveau_eau, 0, 100); // Niveau d'eau entre 0% et 100%
 
 // ================== AJUSTEMENTS POUR TOUS LES CAPTEURS ==================
-// On applique la meme fonction calculerAjustement() a chaque capteur
-$ajust_humidite   = calculerAjustement($humidity);    // Ajustement pour l'humidite
-$ajust_lumiere    = calculerAjustement($lumiere);      // Ajustement pour la lumiere
-$ajust_eau        = calculerAjustement($niveau_eau);   // Ajustement pour le niveau d'eau
-$ajust_arrosage   = calculerAjustement($arrosage);     // Ajustement pour l'arrosage (toujours +40 car 0 ou 1 < 10)
-$ajust_co2        = calculerAjustement($co2);          // Ajustement pour le CO2
+// On additionne la valeur captee + l'ajustement selon la regle (pair: +130, impair: +150, <10: +40)
+$ajust_humidite   = $humidity   + calculerAjustement($humidity);    // Humidite + ajustement
+$ajust_lumiere    = $lumiere    + calculerAjustement($lumiere);      // Lumiere + ajustement
+$ajust_eau        = $niveau_eau + calculerAjustement($niveau_eau);  // Niveau d'eau + ajustement
+$ajust_arrosage   = $arrosage   + calculerAjustement($arrosage);    // Arrosage + ajustement (0+40=40 ou 1+40=41)
+$ajust_co2        = $co2        + calculerAjustement($co2);          // CO2 + ajustement
 
 // ================== INSERTION EN BASE DE DONNEES ==================
 // Prepare une requete securisee (prepared statement) pour inserer les donnees des capteurs + ajustements
