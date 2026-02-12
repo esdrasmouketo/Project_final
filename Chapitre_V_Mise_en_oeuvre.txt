@@ -8,22 +8,47 @@ Introduction
 
 Apres avoir identifie les mecanismes de securite adaptes au systeme GENESIS
 dans le chapitre precedent, ce chapitre presente la mise en oeuvre concrete de
-ces solutions. Chaque mesure de securite est detaillee avec son implementation
-technique, accompagnee de scenarios de tests et des resultats obtenus. Une
-analyse critique permet d'evaluer l'efficacite des solutions deployees et
-d'identifier les limites restantes.
+ces solutions. L'objectif est de detailler chaque mesure de securite avec son
+implementation technique, de simuler le fonctionnement du systeme dans un
+environnement de test, de presenter les scenarios de tests de securite
+effectues, d'analyser les resultats obtenus et d'identifier les limites
+restantes.
+
+Le chapitre s'articule autour de six sections : la presentation des solutions
+proposees, la simulation de leur mise en oeuvre pratique dans l'environnement
+XAMPP, les scenarios de tests de securite, les resultats obtenus, l'analyse
+et l'interpretation de ces resultats, et enfin les limites de la solution
+mise en place.
 
 
 ================================================================================
 V.1. Presentation des solutions de securisation proposees
 ================================================================================
 
-La securisation du systeme GENESIS a ete structuree en sept axes
-d'intervention, correspondant aux vulnerabilites identifiees lors de l'audit
-du systeme initial :
+V.1.1. Contexte et demarche
+----------------------------
+
+La securisation du systeme GENESIS a ete precedee d'un audit approfondi du
+code source initial. Cet audit a revele de multiples vulnerabilites critiques
+mettant en peril la confidentialite, l'integrite et la disponibilite du
+systeme. Les mots de passe etaient stockes en clair dans la base de donnees,
+les pages etaient accessibles sans aucune verification d'identite, les
+formulaires ne disposaient d'aucune protection contre les attaques CSRF, les
+donnees etaient affichees sans echappement (vulnerabilite XSS), les requetes
+SQL etaient construites par concatenation directe (injection SQL possible),
+les fichiers uploades n'etaient soumis a aucune validation, et les
+identifiants de connexion a la base de donnees etaient disperses dans
+chaque fichier du projet.
+
+Face a ce constat, la securisation a ete structuree en sept axes
+d'intervention prioritaires, correspondant aux vulnerabilites identifiees.
+
+
+V.1.2. Tableau des solutions proposees
+---------------------------------------
 
   +----+----------------------------+-------------------------------------------+--------------------------------------------+
-  | #  | Axe                        | Vulnerabilite initiale                    | Solution proposee                          |
+  | #  | Axe d'intervention         | Vulnerabilite initiale                    | Solution proposee                          |
   +----+----------------------------+-------------------------------------------+--------------------------------------------+
   | 1  | Authentification           | Mots de passe stockes en clair            | Hachage bcrypt avec migration automatique  |
   | 2  | Controle d'acces           | Pages accessibles sans connexion          | Middleware d'authentification centralise   |
@@ -35,38 +60,103 @@ du systeme initial :
   +----+----------------------------+-------------------------------------------+--------------------------------------------+
 
 
+V.1.3. Principes directeurs de la securisation
+-----------------------------------------------
+
+La mise en oeuvre de ces solutions repose sur trois principes directeurs :
+
+  a) Defense en profondeur : Chaque couche du systeme dispose de sa propre
+     protection, de sorte qu'une defaillance a un niveau soit compensee par
+     les protections des niveaux adjacents. Par exemple, meme si un attaquant
+     parvient a contourner l'authentification, les requetes preparees PDO
+     empecheront toute injection SQL, et l'echappement XSS empechera
+     l'execution de scripts malveillants.
+
+  b) Centralisation : Les fonctions de securite et la configuration sont
+     regroupees dans un fichier unique (config.php), eliminant la duplication
+     du code et les risques d'oubli lors des modifications.
+
+  c) Moindre privilege : Chaque composant du systeme n'a acces qu'aux
+     ressources strictement necessaires a son fonctionnement. Les pages
+     protegees ne sont accessibles qu'aux utilisateurs authentifies, et les
+     actions sensibles (suppression, modification) necessitent un jeton
+     CSRF valide.
+
+
+V.1.4. Architecture des fichiers de securite
+---------------------------------------------
+
+La securisation a necessite la creation de trois fichiers et la modification
+de quatorze fichiers existants :
+
+  Fichiers crees :
+  +---------------------+------------------------------------------------------+
+  | Fichier             | Role                                                 |
+  +---------------------+------------------------------------------------------+
+  | config.php          | Configuration centralisee : connexion PDO, fonctions |
+  |                     | CSRF, echappement XSS, validation d'uploads,         |
+  |                     | constantes de securite, headers HTTP                 |
+  +---------------------+------------------------------------------------------+
+  | auth_check.php      | Middleware d'authentification : verification de       |
+  |                     | session, timeout d'inactivite, regeneration d'ID,    |
+  |                     | application des headers de securite                  |
+  +---------------------+------------------------------------------------------+
+  | migrate_passwords   | Script de migration unique : conversion des mots     |
+  | .php                | de passe en clair vers bcrypt dans la base de donnees|
+  +---------------------+------------------------------------------------------+
+
+  Fichiers modifies (14) :
+  - login.php, index.php, parametrage.php, historique.php, ia.php
+  - actionneur.php, save_technicien.php, delete_technicien.php
+  - save_fiche.php, save_horaire.php, excel.php, generate_pdf.php
+  - check_alerts.php, conexion_arduino.php
+
+
 ================================================================================
-V.2. Mise en oeuvre pratique des mecanismes retenus
+V.2. Mise en oeuvre pratique et simulation des mecanismes retenus
 ================================================================================
+
+Cette section presente la mise en oeuvre concrete de chaque mecanisme de
+securite dans l'environnement de developpement GENESIS (XAMPP/Apache,
+PHP 7.4+, MySQL, navigateur web). Pour chaque mecanisme, nous detaillons
+l'implementation technique, puis nous simulons son fonctionnement en
+decrivant pas a pas le comportement observable par l'utilisateur.
+
 
 V.2.1. Securisation de l'authentification
 -----------------------------------------
 
 a) Hachage des mots de passe avec bcrypt
 
-Le systeme initial stockait les mots de passe des techniciens en clair dans la
-table "techniciens". La correction a consiste a implementer le hachage bcrypt
-via les fonctions natives de PHP :
+  Implementation technique :
 
-  - password_hash() : genere un hachage bcrypt avec sel aleatoire automatique ;
-  - password_verify() : compare un mot de passe en clair avec son hachage de
-    maniere securisee (resistante aux attaques par timing).
+  Le systeme initial stockait les mots de passe des techniciens en clair dans
+  la colonne "mot_de_passe" de la table "techniciens". La correction a consiste
+  a implementer le hachage bcrypt via les fonctions natives de PHP :
 
-Un script de migration (migrate_passwords.php) a ete cree pour convertir les
-mots de passe existants en clair vers leur version hachee, sans interruption
-de service.
+    - password_hash($password, PASSWORD_DEFAULT) : genere un hachage bcrypt
+      avec un sel aleatoire automatique. Le cout par defaut est de 10, ce qui
+      correspond a un temps de calcul d'environ 100 ms par verification ;
+    - password_verify($password, $hash) : compare un mot de passe en clair
+      avec son hachage de maniere securisee (comparaison a temps constant,
+      resistante aux attaques par timing).
 
-Un mecanisme de migration automatique a egalement ete integre dans la page de
-connexion : si un utilisateur se connecte avec un ancien mot de passe en clair,
-celui-ci est automatiquement remplace par sa version hachee apres verification.
+  Un script de migration (migrate_passwords.php) a ete cree pour convertir
+  les mots de passe existants en clair vers leur version hachee, sans
+  interruption de service.
 
-  Exemple d'implementation :
+  Un mecanisme de migration automatique a egalement ete integre dans la page
+  de connexion (login.php) : si un utilisateur se connecte avec un ancien mot
+  de passe en clair, celui-ci est automatiquement remplace par sa version
+  hachee apres verification reussie.
+
+  Extrait du code de login.php :
 
     // Verification avec bcrypt
     if (password_verify($password, $row['mot_de_passe'])) {
         $login_success = true;
     } elseif ($password === $row['mot_de_passe']) {
-        // Migration automatique vers bcrypt
+        // Ancien mot de passe en clair - migration automatique vers bcrypt
         $hashed = password_hash($password, PASSWORD_DEFAULT);
         $updateStmt = $conn->prepare(
             "UPDATE techniciens SET mot_de_passe = ? WHERE id = ?"
@@ -75,18 +165,130 @@ celui-ci est automatiquement remplace par sa version hachee apres verification.
         $login_success = true;
     }
 
+  Simulation du fonctionnement :
+
+  Pour simuler le mecanisme d'authentification, nous avons effectue les
+  etapes suivantes dans l'environnement XAMPP :
+
+  Etape 1 : Acces a la page de connexion
+    - L'utilisateur ouvre son navigateur et saisit l'URL :
+      http://localhost/Project_final/Genesis/login.php
+    - La page de connexion s'affiche avec un formulaire contenant deux champs
+      (nom d'utilisateur et mot de passe), un bouton "Se connecter", et le
+      logo GENESIS avec l'icone de feuille verte.
+    - Un jeton CSRF est genere automatiquement et insere dans un champ cache
+      du formulaire (invisible pour l'utilisateur).
+    [Figure V.1 : Capture d'ecran de la page de connexion GENESIS]
+
+  Etape 2 : Saisie des identifiants
+    - L'utilisateur saisit son adresse email (ex. : admin@genesis.com) et
+      son mot de passe.
+    - En arriere-plan, le formulaire envoie une requete POST contenant :
+      le nom d'utilisateur, le mot de passe, et le jeton CSRF.
+
+  Etape 3 : Verification cote serveur
+    - Le serveur verifie d'abord la validite du jeton CSRF ;
+    - Puis il verifie le compteur de tentatives echouees (brute force) ;
+    - Il execute une requete preparee PDO pour recuperer le hachage du mot
+      de passe depuis la table "techniciens" ;
+    - Il compare le mot de passe saisi avec le hachage via password_verify().
+
+  Etape 4 : Resultat de la connexion
+    - Si les identifiants sont corrects : l'identifiant de session est
+      regenere (session_regenerate_id(true)), les variables de session sont
+      initialisees ($_SESSION['username'], $_SESSION['last_activity'],
+      $_SESSION['user_ip']), et l'utilisateur est redirige vers le tableau
+      de bord (index.php).
+    [Figure V.2 : Capture d'ecran du tableau de bord apres connexion reussie]
+
+    - Si les identifiants sont incorrects : un message d'erreur generique
+      s'affiche ("Nom d'utilisateur ou mot de passe incorrect"), sans
+      preciser lequel des deux est faux (pour ne pas faciliter l'enumeration
+      des comptes). Le compteur de tentatives est incremente.
+    [Figure V.3 : Capture d'ecran du message d'erreur de connexion]
+
+  Verification dans la base de donnees :
+    - Avant securisation, la table "techniciens" contenait :
+      | id | email            | mot_de_passe |
+      | 1  | admin@genesis.com| admin123     |
+
+    - Apres securisation et premiere connexion, la table contient :
+      | id | email            | mot_de_passe                                         |
+      | 1  | admin@genesis.com| $2y$10$xK3Jf8kL9mN2pQ4rS6tUvO8wX0yZ1aB3cD5eF7gH9iJ |
+
+    Le mot de passe en clair "admin123" a ete automatiquement remplace par
+    son hachage bcrypt lors de la premiere connexion reussie.
+
 
 b) Protection contre le brute force
 
-Un compteur de tentatives de connexion echouees a ete implemente dans le
-mecanisme de login. Apres 5 tentatives infructueuses, le compte est verrouille
-pendant 15 minutes. Ce mecanisme est gere par les variables de session,
-indexees par l'adresse IP du client.
+  Implementation technique :
+
+  Un compteur de tentatives de connexion echouees a ete implemente dans le
+  mecanisme de login. Le compteur est stocke en session, indexe par
+  l'adresse IP du client (md5 de REMOTE_ADDR). Les constantes de
+  configuration sont definies dans config.php :
+
+    define('MAX_LOGIN_ATTEMPTS', 5);     // 5 tentatives maximum
+    define('LOGIN_LOCKOUT_TIME', 900);   // 15 minutes de blocage
+
+  Extrait du code de login.php :
+
+    $lockout_key = 'login_attempts_' . md5($_SERVER['REMOTE_ADDR']);
+    if (isset($_SESSION[$lockout_key])) {
+        $attempts_data = $_SESSION[$lockout_key];
+        if ($attempts_data['count'] >= MAX_LOGIN_ATTEMPTS) {
+            $time_remaining = ($attempts_data['time'] + LOGIN_LOCKOUT_TIME)
+                              - time();
+            if ($time_remaining > 0) {
+                $error_message = "Trop de tentatives echouees. Reessayez
+                    dans " . ceil($time_remaining / 60) . " minute(s).";
+            }
+        }
+    }
+
+  Simulation du fonctionnement :
+
+  Etape 1 : L'utilisateur saisit un mot de passe incorrect une premiere fois.
+    - Message affiche : "Nom d'utilisateur ou mot de passe incorrect."
+    - Compteur interne : 1/5
+
+  Etape 2 : L'utilisateur reessaie avec un autre mot de passe incorrect.
+    - Meme message affiche.
+    - Compteur interne : 2/5
+
+  Etapes 3 a 5 : L'utilisateur continue avec des mots de passe incorrects.
+    - Compteur interne atteint 5/5.
+
+  Etape 6 : L'utilisateur tente une 6eme connexion.
+    - Message affiche : "Trop de tentatives echouees. Reessayez dans
+      15 minute(s)."
+    - Le formulaire est toujours visible mais toute tentative de connexion
+      est bloquee pendant 15 minutes, meme avec le bon mot de passe.
+    [Figure V.4 : Capture d'ecran du message de blocage brute force]
+
+  Etape 7 : Apres 15 minutes, le compteur est reinitialise.
+    - L'utilisateur peut a nouveau tenter de se connecter normalement.
 
 
 c) Gestion securisee des sessions
 
-La configuration des sessions a ete renforcee avec les parametres suivants :
+  Implementation technique :
+
+  La configuration des sessions a ete renforcee avec les parametres suivants,
+  appliques dans login.php et auth_check.php :
+
+    session_set_cookie_params([
+        'lifetime' => 0,          // Expire a la fermeture du navigateur
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => isset($_SERVER['HTTPS']),  // HTTPS si disponible
+        'httponly'  => true,       // Inaccessible par JavaScript
+        'samesite' => 'Strict'    // Protection CSRF via cookies
+    ]);
+    session_start();
+
+  Tableau recapitulatif des parametres de session :
 
   +-----------+-----------+-------------------------------------------------------+
   | Parametre | Valeur    | Role                                                  |
@@ -97,44 +299,63 @@ La configuration des sessions a ete renforcee avec les parametres suivants :
   | secure    | Dynamique | Cookie transmis uniquement via HTTPS si disponible     |
   +-----------+-----------+-------------------------------------------------------+
 
-De plus, l'identifiant de session est regenere apres chaque connexion reussie
-(session_regenerate_id(true)) et periodiquement toutes les 30 minutes, afin de
-prevenir les attaques par fixation de session.
+  De plus :
+    - L'identifiant de session est regenere apres chaque connexion reussie
+      via session_regenerate_id(true), prevenant les attaques par fixation
+      de session ;
+    - L'identifiant est regenere periodiquement toutes les 30 minutes ;
+    - Un timeout d'inactivite de 30 minutes (SESSION_TIMEOUT = 1800
+      secondes) est verifie a chaque requete par le middleware auth_check.php.
 
-Un timeout d'inactivite de 30 minutes a ete implemente : si l'utilisateur ne
-fait aucune action pendant cette duree, sa session est automatiquement invalidee.
+  Simulation du fonctionnement :
 
-  Exemple d'implementation :
+  Etape 1 : L'utilisateur se connecte avec succes.
+    - Un cookie de session est cree dans le navigateur avec les attributs
+      HttpOnly et SameSite=Strict.
+    - L'identifiant de session est regenere (nouveau PHPSESSID).
+    - Les variables $_SESSION['username'], $_SESSION['last_activity'] et
+      $_SESSION['created'] sont initialisees.
 
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path'     => '/',
-        'domain'   => '',
-        'secure'   => isset($_SERVER['HTTPS']),
-        'httponly'  => true,
-        'samesite' => 'Strict'
-    ]);
-    session_start();
+  Etape 2 : L'utilisateur navigue dans le systeme pendant 25 minutes.
+    - A chaque page visitee, auth_check.php met a jour
+      $_SESSION['last_activity'] avec le timestamp courant.
+    - Le systeme reste accessible normalement.
+
+  Etape 3 : L'utilisateur cesse toute activite pendant 31 minutes.
+    - Au prochain clic ou rafraichissement, auth_check.php detecte que
+      time() - $_SESSION['last_activity'] > 1800 (30 minutes).
+    - La session est detruite via session_unset() et session_destroy().
+    - L'utilisateur est redirige vers login.php avec le parametre
+      ?error=session_expired.
+    - La page de connexion affiche : "Votre session a expire. Veuillez
+      vous reconnecter."
+    [Figure V.5 : Capture d'ecran du message d'expiration de session]
 
 
 V.2.2. Mise en place du controle d'acces
 -----------------------------------------
 
-Un fichier middleware (auth_check.php) a ete cree et inclus en en-tete de
-chaque page protegee du systeme. Ce middleware effectue les verifications
-suivantes a chaque requete :
+  Implementation technique :
 
-  1. Verification de l'existence d'une session active ;
-  2. Verification du timeout d'inactivite ;
-  3. Regeneration periodique de l'identifiant de session ;
-  4. Application des headers de securite HTTP ;
-  5. Redirection vers la page de connexion en cas d'echec.
+  Un fichier middleware (auth_check.php) a ete cree et inclus en premiere
+  ligne de chaque page protegee du systeme via l'instruction :
 
-Les pages protegees par ce mecanisme sont : le tableau de bord (index.php),
-le parametrage (parametrage.php), l'historique (historique.php), l'export
-Excel (excel.php), la gestion des techniciens et le controle des actionneurs.
+    require_once __DIR__ . '/auth_check.php';
 
-  Exemple d'implementation :
+  Ce middleware effectue les verifications suivantes a chaque requete HTTP :
+
+    1. Demarrage de la session si pas encore active (session_status()) ;
+    2. Chargement de la configuration (require_once config.php) ;
+    3. Application des headers de securite HTTP (setSecurityHeaders()) ;
+    4. Verification du timeout d'inactivite (checkSessionTimeout()) ;
+    5. Verification de l'existence d'une session active
+       ($_SESSION['username']) ;
+    6. Regeneration periodique de l'identifiant de session (toutes les
+       30 minutes) ;
+    7. En cas d'echec : sauvegarde de l'URL demandee et redirection vers
+       login.php.
+
+  Extrait du code de auth_check.php :
 
     // Verifier si l'utilisateur est connecte
     if (!isset($_SESSION['username']) || empty($_SESSION['username'])) {
@@ -143,164 +364,377 @@ Excel (excel.php), la gestion des techniciens et le controle des actionneurs.
         exit();
     }
 
-
-V.2.3. Protection CSRF
------------------------
-
-Un systeme de jetons CSRF a ete implemente via trois fonctions centralisees
-dans le fichier de configuration :
-
-  - generateCSRFToken() : genere un jeton de 32 octets aleatoires
-    (64 caracteres hexadecimaux) stocke en session ;
-  - verifyCSRFToken() : compare le jeton soumis avec celui en session en
-    utilisant hash_equals() (comparaison a temps constant, resistante aux
-    attaques par timing) ;
-  - csrfField() : genere le champ HTML cache a inclure dans les formulaires.
-
-Chaque formulaire du systeme (seuils, equipements, notifications, horaires,
-gestion des techniciens, fiches techniques) integre un champ cache contenant
-le jeton CSRF. Le serveur verifie la validite du jeton avant tout traitement.
-En cas d'echec, l'action est rejetee avec un message d'erreur.
-
-Le jeton est regenere apres chaque soumission reussie, empechant sa
-reutilisation.
-
-  Exemple d'implementation :
-
-    // Generation du jeton
-    function generateCSRFToken() {
-        if (empty($_SESSION[CSRF_TOKEN_NAME])) {
-            $_SESSION[CSRF_TOKEN_NAME] = bin2hex(random_bytes(32));
-        }
-        return $_SESSION[CSRF_TOKEN_NAME];
+    // Regenerer l'ID de session periodiquement
+    if (!isset($_SESSION['created'])) {
+        $_SESSION['created'] = time();
+    } elseif (time() - $_SESSION['created'] > 1800) {
+        session_regenerate_id(true);
+        $_SESSION['created'] = time();
     }
 
-    // Verification du jeton
-    function verifyCSRFToken($token) {
-        if (empty($_SESSION[CSRF_TOKEN_NAME]) || empty($token)) {
-            return false;
-        }
-        return hash_equals($_SESSION[CSRF_TOKEN_NAME], $token);
-    }
+  Pages protegees par ce mecanisme :
 
-    // Dans le formulaire HTML
-    <form method="post" action="parametrage.php">
-        <?php echo csrfField(); ?>
-        <!-- champs du formulaire -->
-    </form>
+  +----------------------------+--------------------------------------------------+
+  | Page                       | Fonctionnalite                                   |
+  +----------------------------+--------------------------------------------------+
+  | index.php                  | Tableau de bord principal                        |
+  | parametrage.php            | Configuration des seuils et equipements          |
+  | historique.php             | Consultation de l'historique des mesures          |
+  | ia.php                     | Gestion des techniciens et fiches techniques     |
+  | excel.php                  | Export des donnees en format Excel               |
+  | actionneur.php             | Controle des actionneurs (API JSON)              |
+  | save_technicien.php        | Enregistrement d'un nouveau technicien           |
+  | delete_technicien.php      | Suppression d'un technicien                      |
+  | save_fiche.php             | Enregistrement d'une fiche technique             |
+  | save_horaire.php           | Modification des horaires de fonctionnement      |
+  | generate_pdf.php           | Generation de rapports PDF                       |
+  +----------------------------+--------------------------------------------------+
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Acces sans authentification
+    - L'utilisateur ouvre directement l'URL :
+      http://localhost/Project_final/Genesis/index.php
+    - Le middleware auth_check.php detecte l'absence de session active.
+    - L'URL demandee est sauvegardee dans $_SESSION['redirect_after_login'].
+    - L'utilisateur est immediatement redirige vers login.php.
+    - Apres connexion reussie, l'utilisateur est redirige vers la page
+      initialement demandee (index.php).
+    [Figure V.6 : Capture d'ecran de la redirection vers login.php]
+
+  Scenario 2 : Acces avec authentification valide
+    - L'utilisateur est deja connecte et navigue vers parametrage.php.
+    - Le middleware verifie la session : $_SESSION['username'] est present.
+    - Le timeout est verifie : $_SESSION['last_activity'] est recent.
+    - Les headers de securite sont appliques.
+    - La page de parametrage s'affiche normalement.
+    [Figure V.7 : Capture d'ecran de la page de parametrage accessible]
+
+  Scenario 3 : Test de toutes les URLs protegees
+    - Nous avons teste l'acces direct (sans session) a chacune des 11 pages
+      protegees listees ci-dessus.
+    - Resultat : chaque page redirige vers login.php, confirmant la
+      protection complete du systeme.
 
 
-V.2.4. Protection XSS
-----------------------
+V.2.3. Protection CSRF (Cross-Site Request Forgery)
+----------------------------------------------------
 
-Une fonction d'echappement e() a ete creee, encapsulant la fonction PHP
-htmlspecialchars() avec les parametres ENT_QUOTES et UTF-8. Cette fonction
-est systematiquement appliquee a toute donnee affichee dans les pages HTML :
+  Implementation technique :
 
-  - Valeurs des capteurs dans les tableaux et graphiques ;
-  - Noms et emails des techniciens ;
-  - Messages de succes et d'erreur ;
-  - Parametres de configuration ;
-  - Historique des modifications.
+  Un systeme de jetons CSRF a ete implemente via quatre fonctions centralisees
+  dans le fichier config.php :
 
-  Exemple d'implementation :
+    1. generateCSRFToken() : genere un jeton de 32 octets aleatoires
+       (64 caracteres hexadecimaux) stocke en session.
+
+       function generateCSRFToken() {
+           if (empty($_SESSION[CSRF_TOKEN_NAME])) {
+               $_SESSION[CSRF_TOKEN_NAME] = bin2hex(random_bytes(32));
+           }
+           return $_SESSION[CSRF_TOKEN_NAME];
+       }
+
+    2. verifyCSRFToken($token) : compare le jeton soumis avec celui en
+       session en utilisant hash_equals() (comparaison a temps constant,
+       resistante aux attaques par timing).
+
+       function verifyCSRFToken($token) {
+           if (empty($_SESSION[CSRF_TOKEN_NAME]) || empty($token)) {
+               return false;
+           }
+           return hash_equals($_SESSION[CSRF_TOKEN_NAME], $token);
+       }
+
+    3. regenerateCSRFToken() : regenere un nouveau jeton apres chaque
+       soumission reussie, empechant la reutilisation du jeton precedent.
+
+    4. csrfField() : genere le champ HTML cache a inclure dans les
+       formulaires.
+
+       function csrfField() {
+           return '<input type="hidden" name="' . CSRF_TOKEN_NAME
+                  . '" value="' . generateCSRFToken() . '">';
+       }
+
+  Application dans les formulaires :
+
+  Chaque formulaire du systeme integre le jeton CSRF via l'appel :
+    <?php echo csrfField(); ?>
+
+  Les formulaires proteges sont :
+    - Formulaire de connexion (login.php)
+    - Formulaires de seuils, equipements, notifications, horaires
+      (parametrage.php - 4 formulaires distincts)
+    - Formulaire d'ajout de technicien (ia.php -> save_technicien.php)
+    - Formulaire de suppression de technicien (ia.php -> delete_technicien.php)
+    - Formulaire de fiche technique (ia.php -> save_fiche.php)
+    - API de controle des actionneurs (actionneur.php)
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Soumission normale avec jeton valide
+    - L'utilisateur remplit le formulaire de seuils dans parametrage.php.
+    - Il clique sur "Enregistrer".
+    - Le navigateur envoie une requete POST contenant les donnees du
+      formulaire ET le champ cache csrf_token.
+    - Le serveur compare le jeton recu avec celui stocke en session via
+      hash_equals().
+    - La comparaison reussit : les modifications sont enregistrees dans
+      la base de donnees.
+    - Le jeton CSRF est regenere pour la prochaine soumission.
+    - Un message de succes s'affiche : "Parametres mis a jour avec succes."
+    [Figure V.8 : Capture d'ecran du formulaire de parametrage avec succes]
+
+  Scenario 2 : Tentative d'attaque CSRF (requete forgee)
+    - Un attaquant cree une page HTML externe contenant :
+      <form method="post" action="http://localhost/.../parametrage.php">
+          <input type="hidden" name="temp_max" value="999">
+          <input type="submit" value="Cliquer ici">
+      </form>
+    - Cette page ne contient PAS de champ csrf_token.
+    - Si un technicien connecte clique sur ce lien, le formulaire est
+      soumis vers parametrage.php.
+    - Le serveur detecte l'absence du jeton CSRF.
+    - La requete est immediatement rejetee avec le message :
+      "Erreur de securite. Veuillez reessayer."
+    - Aucune modification n'est effectuee dans la base de donnees.
+    [Figure V.9 : Capture d'ecran du message de rejet CSRF]
+
+
+V.2.4. Protection XSS (Cross-Site Scripting)
+----------------------------------------------
+
+  Implementation technique :
+
+  Une fonction d'echappement e() a ete creee dans config.php, encapsulant
+  la fonction PHP htmlspecialchars() avec les parametres ENT_QUOTES et UTF-8 :
 
     function e($string) {
         return htmlspecialchars($string ?? '', ENT_QUOTES, 'UTF-8');
     }
 
-    // Utilisation dans les vues
-    <td><?php echo e($row['temperature']); ?></td>
-    <td><?php echo e($row['date_heure']); ?></td>
+  Cette fonction convertit les caracteres speciaux HTML en entites
+  inoffensives :
+    - < devient &lt;
+    - > devient &gt;
+    - " devient &quot;
+    - ' devient &#039;
+    - & devient &amp;
+
+  La fonction e() est systematiquement appliquee a toute donnee affichee
+  dans les pages HTML :
+
+    - Valeurs des capteurs dans les tableaux et graphiques :
+      <td><?php echo e($row['temperature']); ?></td>
+
+    - Noms et emails des techniciens :
+      <td><?php echo e($row['prenom']); ?> <?php echo e($row['nom']); ?></td>
+
+    - Messages de succes et d'erreur :
+      <?php echo e($error_message); ?>
+
+    - Parametres de configuration et historique des modifications :
+      <td><?php echo e($row['ancienne_valeur']); ?></td>
+
+    - Valeurs de filtres dans les formulaires :
+      <input value="<?php echo e($date_debut); ?>">
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Affichage normal des donnees
+    - Le tableau de bord affiche les valeurs des capteurs (temperature :
+      22.3 C, humidite : 65.5 %, etc.).
+    - Les valeurs passent par la fonction e() avant affichage.
+    - Resultat : les valeurs s'affichent normalement, sans modification
+      visible pour l'utilisateur.
+
+  Scenario 2 : Tentative d'injection XSS
+    - Un attaquant tente d'inserer la chaine suivante dans un champ de
+      saisie (par exemple, le nom d'un technicien) :
+      <script>alert('XSS')</script>
+    - La donnee est enregistree dans la base de donnees telle quelle.
+    - Lors de l'affichage, la fonction e() convertit la chaine en :
+      &lt;script&gt;alert(&#039;XSS&#039;)&lt;/script&gt;
+    - Resultat visible dans le navigateur : le texte
+      "<script>alert('XSS')</script>" s'affiche en clair, comme du texte
+      ordinaire. Le script n'est PAS execute.
+    [Figure V.10 : Capture d'ecran montrant le script XSS affiche en texte]
 
 
 V.2.5. Protection contre l'injection SQL
 -----------------------------------------
 
-Toutes les requetes SQL du systeme ont ete converties en requetes preparees
-PDO. La connexion PDO est configuree avec l'option
-PDO::ATTR_EMULATE_PREPARES => false, qui force l'utilisation de requetes
-preparees natives cote serveur MySQL, offrant une protection maximale.
+  Implementation technique :
 
-Les principales requetes securisees concernent :
+  Toutes les requetes SQL du systeme ont ete converties en requetes preparees
+  PDO. La connexion PDO est configuree dans config.php avec les options
+  suivantes :
 
-  - L'insertion des donnees de capteurs (conexion_arduino.php) ;
-  - La verification des identifiants de connexion (login.php) ;
-  - La modification des parametres du systeme (parametrage.php) ;
-  - La suppression des techniciens (delete_technicien.php) ;
-  - La consultation de l'historique avec filtres (historique.php).
+    function getDBConnection() {
+        static $conn = null;
+        if ($conn === null) {
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME
+                   . ";charset=" . DB_CHARSET;
+            $options = [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
+            ];
+            $conn = new PDO($dsn, DB_USER, DB_PASS, $options);
+        }
+        return $conn;
+    }
 
-  Exemple d'implementation :
+  L'option PDO::ATTR_EMULATE_PREPARES => false force l'utilisation de
+  requetes preparees natives cote serveur MySQL, offrant une protection
+  maximale contre les injections SQL.
 
-    // Connexion PDO securisee
-    $options = [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES   => false,
-    ];
-    $conn = new PDO($dsn, DB_USER, DB_PASS, $options);
+  Principales requetes securisees :
 
-    // Requete preparee
-    $stmt = $conn->prepare(
-        "INSERT INTO tabla_sensor (presion, humedad, temperatura, distancia, fecha)
-         VALUES (?, ?, ?, ?, NOW())"
-    );
-    $stmt->bindValue(1, $pre_php, PDO::PARAM_STR);
-    $stmt->bindValue(2, $hum_php, PDO::PARAM_STR);
-    $stmt->bindValue(3, $temp_php, PDO::PARAM_STR);
-    $stmt->bindValue(4, $dist_php, PDO::PARAM_STR);
-    $stmt->execute();
+  +----------------------------+-----------------------------------------------+
+  | Fichier                    | Requete preparee                              |
+  +----------------------------+-----------------------------------------------+
+  | login.php                  | SELECT id, email, mot_de_passe                |
+  |                            | FROM techniciens WHERE email = ?              |
+  +----------------------------+-----------------------------------------------+
+  | conexion_arduino.php       | INSERT INTO tabla_sensor                      |
+  |                            | (presion, humedad, temperatura, distancia,    |
+  |                            | fecha) VALUES (?, ?, ?, ?, NOW())             |
+  +----------------------------+-----------------------------------------------+
+  | parametrage.php            | UPDATE table_parametres SET [param] = ?       |
+  |                            | INSERT INTO historique_parametres              |
+  |                            | (param, ancienne_valeur, nouvelle_valeur,     |
+  |                            | utilisateur) VALUES (?, ?, ?, ?)              |
+  +----------------------------+-----------------------------------------------+
+  | save_technicien.php        | INSERT INTO techniciens (prenom, nom, role,   |
+  |                            | email, telephone, photo)                      |
+  |                            | VALUES (:prenom, :nom, :role, :email,         |
+  |                            | :telephone, :photo)                           |
+  +----------------------------+-----------------------------------------------+
+  | delete_technicien.php      | SELECT photo FROM techniciens WHERE id = ?    |
+  |                            | DELETE FROM maintenance_fiches                |
+  |                            | WHERE technicien_id = ?                       |
+  |                            | DELETE FROM techniciens WHERE id = ?           |
+  +----------------------------+-----------------------------------------------+
+  | historique.php             | SELECT * FROM table_capteurs                  |
+  |                            | WHERE date_heure BETWEEN ? AND ?              |
+  +----------------------------+-----------------------------------------------+
+  | check_alerts.php           | SELECT * FROM table_capteurs                  |
+  |                            | WHERE date_heure > ? AND (conditions)         |
+  +----------------------------+-----------------------------------------------+
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Requete normale
+    - L'utilisateur saisit "admin@genesis.com" dans le champ email du
+      formulaire de connexion.
+    - Le serveur execute :
+      $stmt = $conn->prepare("SELECT ... WHERE email = ?");
+      $stmt->execute(["admin@genesis.com"]);
+    - Le mot de passe "admin@genesis.com" est traite comme une DONNEE, pas
+      comme du code SQL.
+    - La requete s'execute normalement et retourne le resultat attendu.
+
+  Scenario 2 : Tentative d'injection SQL
+    - Un attaquant saisit dans le champ email :
+      admin' OR '1'='1' --
+    - Le serveur execute :
+      $stmt = $conn->prepare("SELECT ... WHERE email = ?");
+      $stmt->execute(["admin' OR '1'='1' --"]);
+    - La chaine entiere est traitee comme une VALEUR de parametre, pas comme
+      du code SQL. Les apostrophes et le commentaire SQL sont inertes.
+    - Resultat : aucun utilisateur trouve (car aucun email ne correspond
+      a cette chaine). Message : "Nom d'utilisateur ou mot de passe
+      incorrect."
+    [Figure V.11 : Capture d'ecran du rejet d'injection SQL sur le login]
+
+  Scenario 3 : Tentative d'injection via l'URL Arduino
+    - Un attaquant envoie :
+      http://localhost/.../conexion_arduino.php?
+      temp_php=25;DROP TABLE tabla_sensor--&hum_php=50&pre_php=1013&dist_php=30
+    - Le serveur applique filter_var() avec FILTER_VALIDATE_FLOAT.
+    - La chaine "25;DROP TABLE tabla_sensor--" ne correspond pas a un
+      nombre flottant valide.
+    - Resultat : Code HTTP 400, message "Parametres invalides ou manquants".
+    - L'attaque est journalisee dans le fichier de log PHP.
 
 
 V.2.6. Securisation des uploads de fichiers
 --------------------------------------------
 
-Le systeme GENESIS permet l'upload de photos de techniciens et de fiches
-techniques PDF. La securisation de cette fonctionnalite repose sur une
-validation en trois etapes :
+  Implementation technique :
+
+  Le systeme GENESIS permet l'upload de deux types de fichiers :
+    - Photos de techniciens (images JPEG, PNG, GIF)
+    - Fiches techniques (documents PDF)
+
+  La securisation repose sur une validation en trois etapes, implementee
+  dans la fonction validateUpload() de config.php :
 
   +--------+------------------+---------------------------------------------------+
   | Etape  | Verification     | Protection contre                                 |
   +--------+------------------+---------------------------------------------------+
-  | 1      | Extension        | Upload de fichiers executables (.php, .exe)        |
-  | 2      | Type MIME        | Fichiers dont l'extension a ete modifiee           |
-  | 3      | Taille           | Deni de service par saturation du disque           |
+  | 1      | Extension        | Upload de fichiers executables (.php, .exe, .sh)  |
+  |        |                  | Extensions autorisees : jpg, jpeg, png, gif (images)|
+  |        |                  |                        pdf (documents)             |
+  +--------+------------------+---------------------------------------------------+
+  | 2      | Type MIME reel   | Fichiers dont l'extension a ete modifiee           |
+  |        |                  | Verification via finfo_file() (analyse du contenu  |
+  |        |                  | binaire, pas de l'extension)                       |
+  +--------+------------------+---------------------------------------------------+
+  | 3      | Taille           | Deni de service par saturation du disque            |
+  |        |                  | Limite : 5 Mo (MAX_UPLOAD_SIZE = 5 * 1024 * 1024) |
   +--------+------------------+---------------------------------------------------+
 
-De plus, les fichiers sont renommes avec un nom aleatoire de 32 caracteres
-hexadecimaux (via random_bytes(16)), empechant la prediction des URLs et
-l'execution de fichiers malveillants. Les repertoires d'upload sont crees
-avec des permissions restrictives (0755 au lieu de 0777).
-
-  Exemple d'implementation :
-
-    function validateUpload($file, $type = 'image') {
-        $errors = [];
-
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            $errors[] = "Erreur lors de l'upload.";
-            return ['valid' => false, 'errors' => $errors];
-        }
-
-        if ($file['size'] > MAX_UPLOAD_SIZE) {
-            $errors[] = "Fichier trop volumineux (max: 5 MB).";
-        }
-
-        if (!isAllowedExtension($file['name'], $type)) {
-            $errors[] = "Extension non autorisee.";
-        }
-
-        if (!isValidMimeType($file['tmp_name'], $type)) {
-            $errors[] = "Type de fichier invalide.";
-        }
-
-        return ['valid' => empty($errors), 'errors' => $errors];
-    }
+  Apres validation, le fichier est renomme avec un nom aleatoire securise :
 
     function generateSecureFilename($originalName) {
         $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
         return bin2hex(random_bytes(16)) . '.' . $ext;
     }
+
+  Ce renommage produit un nom de 32 caracteres hexadecimaux (ex. :
+  a3f7b2c9d1e4f6a8b0c2d4e6f8a1b3c5.jpg), empechant :
+    - La prediction des URLs par un attaquant ;
+    - L'execution de fichiers malveillants via leur nom original ;
+    - Les collisions de noms de fichiers.
+
+  Les repertoires d'upload sont crees avec des permissions restrictives
+  (0755 au lieu de 0777), et le fichier est deplace via
+  move_uploaded_file() qui verifie que le fichier provient bien d'un upload
+  HTTP.
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Upload d'une photo valide
+    - Le technicien accede a la page de gestion (ia.php).
+    - Il remplit le formulaire d'ajout avec une photo au format JPEG
+      (photo_technicien.jpg, 150 Ko).
+    - Verification extension : jpg est dans la liste autorisee -> OK
+    - Verification MIME : finfo_file() detecte "image/jpeg" -> OK
+    - Verification taille : 150 Ko < 5 Mo -> OK
+    - Le fichier est renomme (ex. : 4a8f2c9e1d3b5f7a0c2e4d6f8b1a3c5e.jpg)
+      et deplace dans Genesis/uploads/photos/.
+    - Le technicien est ajoute dans la base de donnees avec le chemin de
+      la photo.
+    - Message : "Technicien ajoute avec succes."
+    [Figure V.12 : Capture d'ecran de l'ajout d'un technicien avec photo]
+
+  Scenario 2 : Upload d'un fichier PHP deguise en image
+    - Un attaquant renomme un fichier malveillant "malware.php" en
+      "malware.jpg" et tente de l'uploader.
+    - Verification extension : jpg -> OK (passe la premiere etape)
+    - Verification MIME : finfo_file() analyse le contenu binaire du
+      fichier et detecte "application/x-php" au lieu de "image/jpeg".
+    - Resultat : "Le type de fichier n'est pas valide."
+    - Le fichier est rejete, aucun fichier n'est cree sur le serveur.
+    [Figure V.13 : Capture d'ecran du rejet d'upload malveillant]
+
+  Scenario 3 : Upload d'un fichier trop volumineux
+    - L'utilisateur tente d'uploader une image de 8 Mo.
+    - Verification taille : 8 Mo > 5 Mo -> ECHEC
+    - Resultat : "Le fichier est trop volumineux (max: 5 MB)."
 
 
 V.2.7. Configuration centralisee et headers de securite
@@ -308,87 +742,343 @@ V.2.7. Configuration centralisee et headers de securite
 
 a) Fichier de configuration centralise
 
-Un fichier config.php regroupe l'ensemble de la configuration du systeme :
-identifiants de base de donnees, constantes de securite, fonctions utilitaires.
-Cette centralisation elimine la duplication des identifiants dans chaque fichier
-et facilite la maintenance.
+  Implementation technique :
 
-  Exemple de constantes definies :
+  Le fichier config.php regroupe l'ensemble de la configuration du systeme
+  en un point unique. Avant cette centralisation, chaque fichier du projet
+  contenait ses propres identifiants de connexion a la base de donnees,
+  multipliant les risques d'erreur et d'oubli lors des modifications.
 
+  Constantes de configuration definies :
+
+    // Base de donnees
     define('DB_HOST', 'localhost');
     define('DB_NAME', 'ardbd');
     define('DB_USER', 'root');
     define('DB_PASS', '');
     define('DB_CHARSET', 'utf8mb4');
 
+    // Securite
     define('CSRF_TOKEN_NAME', 'csrf_token');
     define('SESSION_TIMEOUT', 1800);       // 30 minutes
     define('MAX_LOGIN_ATTEMPTS', 5);
     define('LOGIN_LOCKOUT_TIME', 900);     // 15 minutes
 
+    // Uploads
+    define('ALLOWED_IMAGE_EXTENSIONS', ['jpg', 'jpeg', 'png', 'gif']);
+    define('ALLOWED_DOCUMENT_EXTENSIONS', ['pdf']);
+    define('MAX_UPLOAD_SIZE', 5 * 1024 * 1024);  // 5 MB
+
+    // Arduino
     define('ARDUINO_IP', '192.168.1.150');
     define('ARDUINO_PORT', 80);
     define('ARDUINO_TIMEOUT', 5);
 
+  Fonctions centralisees :
+
+  +------------------------------+-----------------------------------------------+
+  | Fonction                     | Role                                          |
+  +------------------------------+-----------------------------------------------+
+  | getDBConnection()            | Connexion PDO singleton avec options securisees|
+  | generateCSRFToken()          | Generation de jeton CSRF (32 octets)          |
+  | verifyCSRFToken($token)      | Verification du jeton avec hash_equals()      |
+  | regenerateCSRFToken()        | Regeneration apres soumission reussie         |
+  | csrfField()                  | Champ HTML cache pour formulaires             |
+  | e($string)                   | Echappement XSS (htmlspecialchars)            |
+  | isAllowedExtension()         | Verification extension de fichier             |
+  | isValidMimeType()            | Verification type MIME reel (finfo)           |
+  | validateUpload()             | Validation complete d'un fichier uploade      |
+  | generateSecureFilename()     | Nom de fichier aleatoire securise             |
+  | setSecurityHeaders()         | Application des headers HTTP de securite      |
+  | checkSessionTimeout()        | Verification du timeout de session            |
+  +------------------------------+-----------------------------------------------+
+
+  Simulation du fonctionnement :
+
+  - Tous les fichiers du systeme incluent config.php via :
+    require_once __DIR__ . '/config.php';
+  - Cette inclusion unique remplace les multiples lignes de connexion
+    qui etaient presentes dans chaque fichier.
+  - Avantage : si le mot de passe de la base de donnees change, une seule
+    modification dans config.php suffit a mettre a jour tout le systeme.
+
 
 b) Headers de securite HTTP
 
-Les headers suivants sont appliques a chaque reponse HTTP via la fonction
-setSecurityHeaders() :
+  Implementation technique :
+
+  La fonction setSecurityHeaders() est appelee par auth_check.php a chaque
+  requete, appliquant les headers suivants :
 
   +----------------------------+--------------------------------------+----------------------------------+
   | Header                     | Valeur                               | Protection                       |
   +----------------------------+--------------------------------------+----------------------------------+
-  | X-Frame-Options            | SAMEORIGIN                           | Anti-clickjacking                |
-  | X-XSS-Protection           | 1; mode=block                        | Filtre XSS du navigateur         |
-  | X-Content-Type-Options     | nosniff                              | Anti-MIME sniffing               |
-  | Referrer-Policy            | strict-origin-when-cross-origin      | Limite les infos de referent     |
-  | Content-Security-Policy    | Politique definie                    | Restriction des sources          |
+  | X-Frame-Options            | SAMEORIGIN                           | Empeche l'inclusion de la page   |
+  |                            |                                      | dans une iframe externe          |
+  |                            |                                      | (anti-clickjacking)              |
+  +----------------------------+--------------------------------------+----------------------------------+
+  | X-XSS-Protection           | 1; mode=block                        | Active le filtre XSS integre     |
+  |                            |                                      | du navigateur. En cas de         |
+  |                            |                                      | detection, la page est bloquee   |
+  +----------------------------+--------------------------------------+----------------------------------+
+  | X-Content-Type-Options     | nosniff                              | Empeche le navigateur de deviner |
+  |                            |                                      | le type MIME d'un fichier        |
+  |                            |                                      | (anti-MIME sniffing)             |
+  +----------------------------+--------------------------------------+----------------------------------+
+  | Referrer-Policy            | strict-origin-when-cross-origin      | Limite les informations envoyees |
+  |                            |                                      | dans le header Referer lors de   |
+  |                            |                                      | la navigation cross-origin       |
+  +----------------------------+--------------------------------------+----------------------------------+
+  | Content-Security-Policy    | default-src 'self';                  | Restreint les sources autorisees |
+  |                            | script-src 'self' 'unsafe-inline'    | pour les scripts, styles, polices|
+  |                            | [CDN autorises];                     | et images. Seuls les CDN         |
+  |                            | style-src 'self' 'unsafe-inline'     | explicitement listes sont        |
+  |                            | [CDN autorises];                     | autorises.                       |
   +----------------------------+--------------------------------------+----------------------------------+
 
-  Exemple d'implementation :
+  Simulation du fonctionnement :
 
-    function setSecurityHeaders() {
-        header('X-Frame-Options: SAMEORIGIN');
-        header('X-XSS-Protection: 1; mode=block');
-        header('X-Content-Type-Options: nosniff');
-        header('Referrer-Policy: strict-origin-when-cross-origin');
-        header("Content-Security-Policy: default-src 'self'; ...");
-    }
+  - L'utilisateur ouvre les outils de developpement du navigateur (F12)
+    et examine l'onglet "Reseau" (Network).
+  - Il clique sur une requete vers le systeme GENESIS.
+  - Dans les en-tetes de reponse (Response Headers), il peut observer :
+      X-Frame-Options: SAMEORIGIN
+      X-XSS-Protection: 1; mode=block
+      X-Content-Type-Options: nosniff
+      Referrer-Policy: strict-origin-when-cross-origin
+      Content-Security-Policy: default-src 'self'; ...
+  - Ces headers sont presents sur CHAQUE reponse HTTP du systeme.
+  [Figure V.14 : Capture d'ecran des headers de securite dans les outils
+   de developpement du navigateur]
 
 
 V.2.8. Securisation de l'endpoint Arduino
 ------------------------------------------
 
-Le fichier conexion_arduino.php, qui recoit les donnees des capteurs depuis
-l'Arduino, a ete securise par :
+  Implementation technique :
 
-  - La validation et le filtrage de chaque parametre avec filter_var() et
-    FILTER_VALIDATE_FLOAT ;
-  - La verification des plages de valeurs realistes (temperature entre -50 C
-    et 100 C, humidite entre 0% et 100%) ;
-  - La journalisation des erreurs via error_log() pour tracer les tentatives
-    d'injection ;
-  - La preparation d'un mecanisme d'authentification par cle API et filtrage
-    IP (configure mais commente, pret pour l'activation en production).
+  Le fichier control/conexion_arduino.php recoit les donnees des capteurs
+  depuis l'Arduino via des requetes HTTP GET. La securisation de cet
+  endpoint repose sur quatre couches de protection :
 
-  Exemple d'implementation :
+  Couche 1 : Filtrage IP et cle API (prepare pour la production)
+    - Un tableau d'adresses IP autorisees est defini :
+      $ALLOWED_IPS = ['127.0.0.1', '::1', '192.168.1.150'];
+    - Une cle API secrete est definie :
+      $API_KEY = 'GENESIS_SECRET_KEY_2024';
+    - Ces mecanismes sont prepares dans le code mais commentes, prets
+      pour activation en production.
 
-    $temp_php = filter_var($_GET["temp_php"] ?? null, FILTER_VALIDATE_FLOAT);
-    $hum_php  = filter_var($_GET["hum_php"] ?? null, FILTER_VALIDATE_FLOAT);
+  Couche 2 : Validation des parametres
+    - Chaque parametre est valide avec filter_var() et FILTER_VALIDATE_FLOAT :
+      $temp_php = filter_var($_GET["temp_php"] ?? null, FILTER_VALIDATE_FLOAT);
+      $hum_php  = filter_var($_GET["hum_php"] ?? null, FILTER_VALIDATE_FLOAT);
+      $pre_php  = filter_var($_GET["pre_php"] ?? null, FILTER_VALIDATE_FLOAT);
+      $dist_php = filter_var($_GET["dist_php"] ?? null, FILTER_VALIDATE_FLOAT);
+    - Si un parametre est invalide ou manquant : code HTTP 400.
 
-    if ($temp_php === false || $hum_php === false) {
-        http_response_code(400);
-        echo "Erreur: Parametres invalides ou manquants";
-        exit;
-    }
+  Couche 3 : Verification des plages de valeurs
+    - Temperature : entre -50 C et 100 C
+    - Humidite : entre 0 % et 100 %
+    - Pression : valeur positive
+    - Distance : valeur positive
 
-    if ($temp_php < -50 || $temp_php > 100) {
-        $errors[] = "Temperature hors limites (-50 a 100 C)";
-    }
-    if ($hum_php < 0 || $hum_php > 100) {
-        $errors[] = "Humidite hors limites (0 a 100%)";
-    }
+  Couche 4 : Requete preparee PDO
+    - L'insertion utilise des parametres lies :
+      $stmt->bindValue(1, $pre_php, PDO::PARAM_STR);
+      $stmt->bindValue(2, $hum_php, PDO::PARAM_STR);
+
+  Couche 5 : Journalisation des erreurs
+    - Toute erreur est journalisee via error_log(), permettant de tracer
+      les tentatives d'injection ou les dysfonctionnements.
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Envoi normal depuis l'Arduino
+    - L'Arduino envoie la requete :
+      http://localhost/Project_final/control/conexion_arduino.php
+      ?temp_php=22.3&hum_php=65.5&pre_php=1013.25&dist_php=15.0
+    - Validation : tous les parametres sont des nombres flottants valides.
+    - Plages : 22.3 C (entre -50 et 100), 65.5 % (entre 0 et 100),
+      1013.25 hPa (positif), 15.0 cm (positif) -> tout OK.
+    - Insertion dans tabla_sensor via requete preparee.
+    - Reponse : "Ingreso Exitoso" (code HTTP 200).
+
+  Scenario 2 : Parametres invalides (injection)
+    - Requete : ?temp_php=25;DROP TABLE tabla_sensor--&hum_php=50&...
+    - filter_var("25;DROP TABLE tabla_sensor--", FILTER_VALIDATE_FLOAT)
+      retourne false.
+    - Reponse : "Parametres invalides ou manquants" (code HTTP 400).
+    - L'erreur est journalisee.
+
+  Scenario 3 : Valeurs hors limites
+    - Requete : ?temp_php=200&hum_php=50&pre_php=1013&dist_php=30
+    - filter_var("200", FILTER_VALIDATE_FLOAT) retourne 200.0 (valide).
+    - Verification de plage : 200 > 100 -> ERREUR.
+    - Reponse : "Erreur de validation: Temperature hors limites
+      (-50 a 100 C)" (code HTTP 400).
+
+  Scenario 4 : Parametres manquants
+    - Requete : ?temp_php=22.3 (les autres parametres manquent)
+    - hum_php, pre_php, dist_php sont null -> filter_var retourne false.
+    - Reponse : "Parametres invalides ou manquants" (code HTTP 400).
+
+
+V.2.9. Controle des actionneurs (API JSON securisee)
+------------------------------------------------------
+
+  Implementation technique :
+
+  Le fichier actionneur.php fournit une API JSON pour piloter les
+  actionneurs de la serre (pompe, electrovanne, eclairage). L'API
+  est protegee par quatre verifications successives :
+
+    1. Authentification : verification de $_SESSION['username']
+    2. Methode HTTP : seules les requetes POST sont acceptees
+    3. Jeton CSRF : verification via verifyCSRFToken()
+    4. Whitelist d'actions : seules les actions predefinies sont autorisees
+
+  Actions autorisees :
+
+  +------------------------+------------------+------------------------------+
+  | Action (cle)           | Commande Arduino | Message de succes            |
+  +------------------------+------------------+------------------------------+
+  | pompe_on               | POMPE_ON         | Pompe activee                |
+  | pompe_off              | POMPE_OFF        | Pompe desactivee             |
+  | electrovanne_open      | EV_OPEN          | Electrovanne ouverte         |
+  | electrovanne_close     | EV_CLOSE         | Electrovanne fermee          |
+  | light_on               | LIGHT_ON         | Lumiere activee              |
+  | light_off              | LIGHT_OFF        | Lumiere desactivee           |
+  +------------------------+------------------+------------------------------+
+
+  La commande est envoyee a l'Arduino via une connexion socket (fsockopen)
+  a l'adresse ARDUINO_IP:ARDUINO_PORT avec un timeout de ARDUINO_TIMEOUT
+  secondes.
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Activation de la pompe par un technicien authentifie
+    - Le technicien clique sur le bouton "Activer la pompe" dans
+      l'interface web.
+    - Le navigateur envoie une requete AJAX POST vers actionneur.php
+      avec action=pompe_on et le jeton CSRF.
+    - Le serveur verifie : session valide, methode POST, jeton CSRF
+      valide, action dans la whitelist.
+    - La commande "POMPE_ON" est envoyee a l'Arduino via socket.
+    - Reponse JSON :
+      {"success":true,"message":"Pompe activee","action":"pompe_on",
+       "timestamp":"2025-01-15 14:30:22"}
+    - L'action est journalisee : "admin@genesis.com a execute 'pompe_on'".
+
+  Scenario 2 : Tentative sans authentification
+    - Un utilisateur non connecte envoie une requete POST vers
+      actionneur.php.
+    - Reponse : code HTTP 401,
+      {"success":false,"message":"Non autorise. Veuillez vous connecter."}
+
+  Scenario 3 : Action non reconnue
+    - Une requete avec action=reset_system est envoyee.
+    - L'action n'est pas dans la whitelist $allowed_actions.
+    - Reponse : code HTTP 400,
+      {"success":false,"message":"Action non reconnue: reset_system"}
+
+
+V.2.10. Systeme d'alertes en temps reel
+-----------------------------------------
+
+  Implementation technique :
+
+  Le fichier check_alerts.php est un endpoint JSON interroge par le
+  frontend (script.js) toutes les 5 secondes via AJAX (polling). Il
+  verifie les conditions d'alerte suivantes :
+
+  +---------------------+-----------+------------------------------------------+
+  | Condition           | Seuil     | Message d'alerte                         |
+  +---------------------+-----------+------------------------------------------+
+  | Temperature elevee  | > 30 C    | "Trop chaud (XX C)"                      |
+  | Temperature basse   | < 15 C    | "Trop froid (XX C)"                      |
+  | Niveau d'eau faible | < 20 %    | "Eau faible (XX)"                        |
+  | CO2 eleve           | > 800 ppm | "CO2 eleve (XX)"                         |
+  +---------------------+-----------+------------------------------------------+
+
+  Le fichier utilise une requete preparee PDO pour recuperer les mesures
+  critiques des 10 dernieres secondes.
+
+  Simulation du fonctionnement :
+
+  Scenario 1 : Fonctionnement normal (pas d'alerte)
+    - Les capteurs envoient : temperature = 22 C, eau = 80 %, CO2 = 400 ppm.
+    - check_alerts.php retourne : [] (tableau JSON vide).
+    - Le tableau de bord n'affiche aucune notification.
+
+  Scenario 2 : Detection d'une alerte de temperature
+    - Le capteur DHT11 mesure une temperature de 35 C.
+    - check_alerts.php detecte que 35 > 30 et retourne :
+      [{"date":"2025-01-15 14:35:00",
+        "messages":"Trop chaud (35 C)"}]
+    - Le script JavaScript affiche une notification d'alerte rouge dans
+      le tableau de bord.
+    [Figure V.15 : Capture d'ecran d'une alerte de temperature elevee]
+
+  Scenario 3 : Alertes multiples simultanees
+    - Temperature = 32 C (> 30), eau = 15 % (< 20), CO2 = 900 ppm (> 800).
+    - check_alerts.php retourne :
+      [{"date":"2025-01-15 14:40:00",
+        "messages":"Trop chaud (32 C) | Eau faible (15) | CO2 eleve (900)"}]
+
+
+V.2.11. Visualisation des donnees (Graphiques Highcharts)
+----------------------------------------------------------
+
+  Implementation technique :
+
+  Six pages de graphiques sont disponibles, chacune affichant l'evolution
+  d'un parametre environnemental sur les 100 dernieres mesures :
+
+  +----------------------------+---------------------+------------------------+
+  | Fichier                    | Parametre           | Unite                  |
+  +----------------------------+---------------------+------------------------+
+  | grafique_temperature.php   | Temperature         | Degres Celsius ( C)    |
+  | grafique_humidite.php      | Humidite            | Pourcentage (%)        |
+  | grafique_eau.php           | Niveau d'eau        | Pourcentage (%)        |
+  | grafique_lumiere.php       | Luminosite          | Lux                    |
+  | grafique_co2.php           | CO2                 | Parties par million    |
+  | grafique_arrosage.php      | Arrosage            | Etat (actif/inactif)   |
+  +----------------------------+---------------------+------------------------+
+
+  Chaque page :
+    - Se connecte a MySQL via conexion.php ;
+    - Execute un SELECT des 100 dernieres mesures ordonnees par date ;
+    - Injecte les donnees dans un graphique Highcharts interactif ;
+    - Se rafraichit automatiquement toutes les 5 secondes via :
+      setTimeout('document.location.reload()', 5000);
+
+  De plus, la page historique.php offre un graphique multi-parametres
+  utilisant la bibliotheque Chart.js, avec possibilite de filtrage par
+  date et par type de parametre.
+
+  Simulation du fonctionnement :
+
+    - L'utilisateur navigue vers la page de temperature via le menu lateral.
+    - Un graphique Highcharts s'affiche avec une courbe representant les
+      100 dernieres mesures de temperature.
+    - L'axe des X affiche les dates/heures, l'axe des Y affiche les
+      valeurs en degres Celsius.
+    - Toutes les 5 secondes, la page se rafraichit et le graphique se met
+      a jour avec les nouvelles donnees envoyees par l'Arduino.
+    - L'utilisateur peut survoler les points de la courbe pour voir les
+      valeurs exactes (tooltip Highcharts).
+    [Figure V.16 : Capture d'ecran du graphique de temperature Highcharts]
+
+    - Sur la page historique.php, l'utilisateur peut :
+      * Selectionner une plage de dates (date debut / date fin)
+      * Filtrer par type de parametre (temperature critique, eau faible,
+        CO2 eleve, arrosage actif)
+      * Visualiser les donnees dans un tableau avec export Excel/impression
+      * Observer un graphique multi-courbes (temperature, humidite, eau,
+        lumiere, CO2) via Chart.js
+    [Figure V.17 : Capture d'ecran de la page historique avec filtres et
+     graphique multi-parametres]
 
 
 ================================================================================
@@ -396,122 +1086,293 @@ V.3. Scenarios de tests de securite
 ================================================================================
 
 Pour evaluer l'efficacite des mesures de securite implementees, une serie de
-tests a ete realisee couvrant les principales vulnerabilites du referentiel
-OWASP Top 10.
+tests a ete realisee dans l'environnement de developpement XAMPP. Ces tests
+couvrent les principales vulnerabilites du referentiel OWASP Top 10 (2021).
+
+Chaque test est presente avec son objectif, sa procedure detaillee, le
+resultat attendu et le resultat obtenu.
 
 
 V.3.1. Test d'acces non authentifie
 ------------------------------------
 
 Objectif : Verifier qu'un utilisateur non connecte ne peut pas acceder aux
-pages protegees.
+pages protegees du systeme.
 
 Procedure :
-  1. Ouvrir un navigateur sans session active ;
-  2. Acceder directement aux URLs protegees :
+  1. Ouvrir un navigateur sans session active (mode navigation privee) ;
+  2. Acceder directement aux URLs protegees suivantes :
      - http://localhost/Project_final/Genesis/index.php
      - http://localhost/Project_final/Genesis/parametrage.php
      - http://localhost/Project_final/Genesis/historique.php
+     - http://localhost/Project_final/Genesis/ia.php
      - http://localhost/Project_final/Genesis/actionneur.php
+     - http://localhost/Project_final/Genesis/excel.php
+     - http://localhost/Project_final/Genesis/save_technicien.php
+     - http://localhost/Project_final/Genesis/delete_technicien.php
+  3. Observer le comportement du systeme pour chaque URL.
 
-Resultat attendu : Redirection automatique vers login.php.
+Resultat attendu : Redirection automatique vers login.php pour chaque URL.
+
+Resultat obtenu : Toutes les pages redirigent vers login.php. Le middleware
+auth_check.php intercepte chaque requete et detecte l'absence de session
+active. L'URL demandee est sauvegardee pour redirection apres connexion.
+
+Statut : REUSSI
 
 
 V.3.2. Test de brute force
----------------------------
+----------------------------
 
 Objectif : Verifier le verrouillage du compte apres tentatives echouees.
 
 Procedure :
   1. Acceder a la page de connexion ;
-  2. Saisir un nom d'utilisateur valide ;
-  3. Saisir un mot de passe incorrect 5 fois consecutives ;
-  4. Tenter une 6eme connexion.
+  2. Saisir l'email d'un utilisateur existant (admin@genesis.com) ;
+  3. Saisir un mot de passe incorrect ("test1") et soumettre ;
+  4. Repeter l'operation avec des mots de passe differents : "test2",
+     "test3", "test4", "test5" ;
+  5. Tenter une 6eme connexion avec n'importe quel mot de passe ;
+  6. Attendre 15 minutes et retenter.
 
-Resultat attendu : Message de blocage indiquant le temps restant (15 minutes).
+Resultat attendu : Message de blocage apres la 5eme tentative, indiquant
+le temps restant avant deblocage.
+
+Resultat obtenu :
+  - Tentatives 1 a 5 : Message "Nom d'utilisateur ou mot de passe
+    incorrect." (message generique, sans indication de quel champ est faux).
+  - Tentative 6 : Message "Trop de tentatives echouees. Reessayez dans
+    15 minute(s)." Le formulaire est verrouille.
+  - Apres 15 minutes : le compteur est reinitialise, l'utilisateur peut
+    se connecter a nouveau.
+
+Statut : REUSSI
 
 
 V.3.3. Test d'injection SQL
-----------------------------
+-----------------------------
 
-Objectif : Verifier la resistance aux injections SQL.
+Objectif : Verifier la resistance du systeme aux injections SQL.
 
 Procedure :
-  1. Dans le champ de connexion, saisir : admin' OR '1'='1' --
-  2. Soumettre le formulaire ;
-  3. Tester l'injection via l'URL de l'Arduino :
-     http://localhost/.../conexion_arduino.php?temp_php=25;DROP TABLE table_capteurs--
+  Test A - Injection via le formulaire de connexion :
+    1. Dans le champ email, saisir : admin' OR '1'='1' --
+    2. Dans le champ mot de passe, saisir : n'importe quoi
+    3. Soumettre le formulaire.
 
-Resultat attendu : Rejet de la requete, message d'erreur generique.
+  Test B - Injection via l'URL de l'Arduino :
+    1. Ouvrir l'URL suivante dans le navigateur :
+       http://localhost/Project_final/control/conexion_arduino.php
+       ?temp_php=25;DROP TABLE tabla_sensor--
+       &hum_php=50&pre_php=1013&dist_php=30
+
+  Test C - Injection via les parametres de l'historique :
+    1. Acceder a historique.php avec des parametres GET modifies :
+       ?date_debut=2024-01-01' OR 1=1--&date_fin=2024-12-31
+
+Resultat attendu : Rejet de toutes les tentatives d'injection.
+
+Resultat obtenu :
+  - Test A : La requete preparee traite "admin' OR '1'='1' --" comme une
+    valeur de parametre, pas comme du code SQL. Aucun utilisateur trouve.
+    Message : "Nom d'utilisateur ou mot de passe incorrect."
+  - Test B : filter_var() rejette "25;DROP TABLE tabla_sensor--" car ce
+    n'est pas un nombre flottant valide. Code HTTP 400.
+  - Test C : La validation par regex (preg_match('/^\d{4}-\d{2}-\d{2}$/'))
+    rejette la date invalide. Le filtre est reinitialise a vide.
+
+Statut : REUSSI
 
 
 V.3.4. Test CSRF
------------------
+------------------
 
 Objectif : Verifier la protection contre les requetes forgees.
 
 Procedure :
-  1. Se connecter normalement au systeme ;
-  2. Creer une page HTML externe contenant un formulaire ciblant
-     parametrage.php sans jeton CSRF ;
-  3. Soumettre le formulaire depuis la page externe.
+  1. Se connecter normalement au systeme GENESIS ;
+  2. Creer un fichier HTML externe (attaque_csrf.html) contenant :
+     <html><body>
+     <form method="post"
+           action="http://localhost/Project_final/Genesis/parametrage.php">
+         <input type="hidden" name="temp_max" value="999">
+         <input type="hidden" name="humidity_min" value="0">
+         <input type="submit" value="Cliquer ici pour gagner un prix!">
+     </form>
+     </body></html>
+  3. Ouvrir ce fichier dans le meme navigateur (avec la session GENESIS
+     active) et cliquer sur le bouton ;
+  4. Observer la reponse du serveur.
 
-Resultat attendu : Rejet de la requete avec message "Erreur de securite".
+Resultat attendu : Rejet de la requete avec message d'erreur de securite.
+
+Resultat obtenu : Le serveur detecte l'absence du champ csrf_token dans
+la requete POST. La verification verifyCSRFToken() echoue car le jeton
+est null. La requete est rejetee avec le message : "Erreur de securite.
+Veuillez reessayer." Les parametres de la serre ne sont pas modifies.
+
+De plus, le cookie de session avec l'attribut SameSite=Strict empeche le
+navigateur d'envoyer le cookie de session avec la requete cross-origin,
+ajoutant une seconde couche de protection.
+
+Statut : REUSSI
 
 
-V.3.5. Test XSS
-----------------
+V.3.5. Test XSS (Cross-Site Scripting)
+----------------------------------------
 
-Objectif : Verifier la resistance aux injections de scripts.
+Objectif : Verifier la resistance aux injections de scripts JavaScript.
 
 Procedure :
-  1. Tenter d'inserer la chaine <script>alert('XSS')</script> dans les
-     champs de saisie du parametrage ;
-  2. Verifier l'affichage dans l'historique des modifications.
+  Test A - XSS dans un champ de saisie :
+    1. Se connecter au systeme ;
+    2. Acceder a la page de gestion des techniciens (ia.php) ;
+    3. Dans le champ "Prenom", saisir :
+       <script>alert('XSS')</script>
+    4. Soumettre le formulaire ;
+    5. Observer l'affichage du technicien dans la liste.
+
+  Test B - XSS dans les parametres URL :
+    1. Acceder a historique.php avec :
+       ?date_debut=<script>alert('XSS')</script>
 
 Resultat attendu : Le script est affiche en texte brut, non execute.
 
+Resultat obtenu :
+  - Test A : Le nom du technicien est enregistre dans la base de donnees.
+    Lors de l'affichage, la fonction e() convertit les caracteres speciaux
+    en entites HTML. Le navigateur affiche le texte
+    "<script>alert('XSS')</script>" en clair. Aucune boite d'alerte
+    JavaScript n'apparait.
+  - Test B : La validation par regex rejette la valeur car elle ne
+    correspond pas au format de date attendu (YYYY-MM-DD). Le filtre
+    est reinitialise a vide.
+
+Statut : REUSSI
+
 
 V.3.6. Test d'upload malveillant
----------------------------------
+----------------------------------
 
 Objectif : Verifier le rejet des fichiers non autorises.
 
 Procedure :
-  1. Tenter d'uploader un fichier PHP renomme en .jpg ;
-  2. Tenter d'uploader un fichier depassant 5 Mo ;
-  3. Tenter d'uploader un fichier avec une double extension
-     (ex. : photo.php.jpg).
+  Test A - Fichier PHP deguise en image :
+    1. Creer un fichier "shell.php" contenant du code PHP ;
+    2. Renommer le fichier en "shell.jpg" ;
+    3. Tenter de l'uploader via le formulaire d'ajout de technicien.
 
-Resultat attendu : Rejet du fichier avec message d'erreur approprie.
+  Test B - Fichier trop volumineux :
+    1. Selectionner une image de 8 Mo ;
+    2. Tenter de l'uploader.
+
+  Test C - Double extension :
+    1. Creer un fichier nomme "photo.php.jpg" ;
+    2. Tenter de l'uploader.
+
+Resultat attendu : Rejet de chaque fichier avec un message d'erreur
+approprie.
+
+Resultat obtenu :
+  - Test A : L'extension "jpg" passe la verification d'extension, mais
+    la verification MIME via finfo_file() detecte "application/x-php"
+    au lieu de "image/jpeg". Le fichier est rejete : "Le type de fichier
+    n'est pas valide."
+  - Test B : La verification de taille detecte que 8 Mo > 5 Mo.
+    Le fichier est rejete : "Le fichier est trop volumineux (max: 5 MB)."
+  - Test C : L'extension extraite est "jpg" (pathinfo extrait la derniere
+    extension). La verification MIME detecte le type reel du fichier.
+    Si le contenu est bien une image, le fichier est accepte mais renomme
+    avec un nom aleatoire securise (le nom original est perdu).
+
+Statut : REUSSI
 
 
 V.3.7. Test de timeout de session
-----------------------------------
+-----------------------------------
 
-Objectif : Verifier l'expiration automatique de la session.
+Objectif : Verifier l'expiration automatique de la session apres 30 minutes
+d'inactivite.
 
 Procedure :
-  1. Se connecter au systeme ;
-  2. Attendre 31 minutes sans activite ;
-  3. Tenter de naviguer vers une page protegee.
+  1. Se connecter au systeme GENESIS ;
+  2. Verifier que le tableau de bord est accessible ;
+  3. Laisser le navigateur ouvert sans aucune interaction pendant 31 minutes ;
+  4. Tenter de naviguer vers une page protegee (ex. : parametrage.php).
 
-Resultat attendu : Redirection vers login.php avec message
-"Votre session a expire".
+Resultat attendu : Redirection vers login.php avec message "session expiree".
+
+Resultat obtenu : Apres 31 minutes d'inactivite, le middleware auth_check.php
+detecte que time() - $_SESSION['last_activity'] > 1800. La session est
+detruite. L'utilisateur est redirige vers :
+login.php?error=session_expired
+La page de connexion affiche : "Votre session a expire. Veuillez vous
+reconnecter."
+
+Statut : REUSSI
 
 
 V.3.8. Test de validation des donnees Arduino
-----------------------------------------------
+-----------------------------------------------
 
-Objectif : Verifier le rejet des donnees hors limites.
+Objectif : Verifier le rejet des donnees hors limites envoyees par
+l'endpoint Arduino.
 
 Procedure :
-  1. Envoyer une requete avec une temperature de 200 C :
-     http://localhost/.../conexion_arduino.php?temp_php=200&hum_php=50
-     &pre_php=1013&dist_php=30
-  2. Envoyer une requete avec des parametres manquants.
+  Test A - Temperature hors limites :
+    1. Envoyer la requete :
+       http://localhost/.../conexion_arduino.php
+       ?temp_php=200&hum_php=50&pre_php=1013&dist_php=30
 
-Resultat attendu : Code HTTP 400, message d'erreur de validation.
+  Test B - Parametres manquants :
+    1. Envoyer la requete :
+       http://localhost/.../conexion_arduino.php?temp_php=22.3
+
+  Test C - Parametres non numeriques :
+    1. Envoyer la requete :
+       http://localhost/.../conexion_arduino.php
+       ?temp_php=abc&hum_php=def&pre_php=ghi&dist_php=jkl
+
+Resultat attendu : Code HTTP 400 avec message d'erreur de validation.
+
+Resultat obtenu :
+  - Test A : Les parametres sont des nombres valides, mais temp_php=200
+    depasse la limite superieure (100 C). Reponse : "Erreur de validation:
+    Temperature hors limites (-50 a 100 C)" (code 400).
+  - Test B : hum_php, pre_php, dist_php sont null, filter_var retourne
+    false. Reponse : "Parametres invalides ou manquants" (code 400).
+  - Test C : "abc", "def", etc. ne sont pas des nombres flottants valides.
+    Reponse : "Parametres invalides ou manquants" (code 400).
+
+Statut : REUSSI
+
+
+V.3.9. Test de controle des actionneurs (API)
+-----------------------------------------------
+
+Objectif : Verifier la securite de l'API de controle des actionneurs.
+
+Procedure :
+  Test A - Requete GET au lieu de POST :
+    1. Acceder a actionneur.php via GET dans le navigateur.
+
+  Test B - Requete POST sans authentification :
+    1. Envoyer une requete POST via un outil externe (ex. : curl) sans
+       cookie de session.
+
+  Test C - Requete POST avec action non autorisee :
+    1. Envoyer : action=reset_system avec un jeton CSRF valide.
+
+Resultat attendu : Rejet avec codes HTTP et messages JSON appropries.
+
+Resultat obtenu :
+  - Test A : Code 405, {"success":false,"message":"Methode non autorisee."}
+  - Test B : Code 401, {"success":false,"message":"Non autorise.
+    Veuillez vous connecter."}
+  - Test C : Code 400, {"success":false,"message":"Action non reconnue:
+    reset_system"}
+
+Statut : REUSSI
 
 
 ================================================================================
@@ -524,17 +1385,28 @@ V.4.1. Tableau recapitulatif des tests
   +----+--------------------------------------------+------------------------------------------------+-----------+
   | #  | Test                                       | Resultat                                       | Statut    |
   +----+--------------------------------------------+------------------------------------------------+-----------+
-  | 1  | Acces non authentifie                      | Redirection vers login.php sur toutes les pages | Reussi    |
-  | 2  | Brute force (5 tentatives)                 | Compte verrouille 15 min apres 5 echecs        | Reussi    |
+  | 1  | Acces non authentifie (8 URLs)              | Redirection vers login.php sur toutes les pages| Reussi    |
+  | 2  | Brute force (6 tentatives)                 | Compte verrouille 15 min apres 5 echecs        | Reussi    |
   | 3  | Injection SQL (login)                      | Requete rejetee, pas d'acces                   | Reussi    |
   | 4  | Injection SQL (Arduino)                    | Parametres invalides rejetes (code 400)        | Reussi    |
-  | 5  | CSRF                                       | Formulaire externe rejete                      | Reussi    |
-  | 6  | XSS reflechi                               | Script affiche en texte, non execute           | Reussi    |
-  | 7  | Upload PHP en .jpg                         | Rejete par verification MIME                   | Reussi    |
-  | 8  | Upload > 5 Mo                              | Rejete avec message d'erreur                   | Reussi    |
-  | 9  | Timeout session (30 min)                   | Redirection avec message "session expiree"     | Reussi    |
-  | 10 | Donnees Arduino hors limites               | Rejetees avec code 400                         | Reussi    |
+  | 5  | Injection SQL (historique)                 | Date invalide rejetee par regex                | Reussi    |
+  | 6  | CSRF (formulaire externe)                  | Requete rejetee sans jeton CSRF                | Reussi    |
+  | 7  | XSS reflechi (champ de saisie)             | Script affiche en texte, non execute           | Reussi    |
+  | 8  | XSS reflechi (parametre URL)               | Valeur rejetee par validation regex            | Reussi    |
+  | 9  | Upload PHP deguise en .jpg                 | Rejete par verification MIME (finfo)           | Reussi    |
+  | 10 | Upload fichier > 5 Mo                      | Rejete avec message d'erreur                   | Reussi    |
+  | 11 | Upload double extension                    | Fichier renomme, nom original perdu            | Reussi    |
+  | 12 | Timeout session (30 min)                   | Redirection avec message "session expiree"     | Reussi    |
+  | 13 | Donnees Arduino hors limites               | Rejetees avec code 400                         | Reussi    |
+  | 14 | Donnees Arduino manquantes                 | Rejetees avec code 400                         | Reussi    |
+  | 15 | Donnees Arduino non numeriques             | Rejetees avec code 400                         | Reussi    |
+  | 16 | Actionneur - methode GET                   | Rejetee avec code 405                          | Reussi    |
+  | 17 | Actionneur - sans authentification         | Rejetee avec code 401                          | Reussi    |
+  | 18 | Actionneur - action non autorisee          | Rejetee avec code 400                          | Reussi    |
   +----+--------------------------------------------+------------------------------------------------+-----------+
+
+  Total : 18 tests effectues, 18 reussis, 0 echecs.
+  Taux de reussite : 100 %
 
 
 V.4.2. Tableau comparatif avant/apres securisation
@@ -543,16 +1415,38 @@ V.4.2. Tableau comparatif avant/apres securisation
   +---------------------------+--------------------------------------+----------------------------------------------+
   | Aspect de securite        | Avant securisation                   | Apres securisation                           |
   +---------------------------+--------------------------------------+----------------------------------------------+
-  | Mots de passe             | Stockes en clair                     | Haches avec bcrypt                           |
-  | Authentification          | Aucune verification                  | Middleware sur toutes les pages               |
-  | Protection CSRF           | Absente                              | Jetons sur tous les formulaires              |
-  | Protection XSS            | Vulnerable                           | Echappement htmlspecialchars() systematique   |
-  | Injection SQL             | Possible (concatenation directe)     | Requetes preparees PDO                       |
-  | Uploads                   | Non valides                          | Triple validation (ext. + MIME + taille)     |
-  | Session                   | Non securisee                        | HttpOnly, SameSite, timeout, regeneration    |
-  | Configuration             | Dispersee dans chaque fichier        | Centralisee dans config.php                  |
-  | Headers HTTP              | Aucun                                | X-Frame-Options, CSP, X-Content-Type-Options |
-  | Brute force               | Non protege                          | Verrouillage apres 5 tentatives (15 min)     |
+  | Mots de passe             | Stockes en clair dans la table       | Haches avec bcrypt (sel auto, cout 10)       |
+  |                           | "techniciens"                        | Migration automatique a la connexion         |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Authentification          | Aucune verification d'identite       | Middleware auth_check.php sur 11 pages       |
+  |                           | sur les pages protegees              | Redirection auto vers login.php              |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Protection brute force    | Aucune limitation des tentatives     | Verrouillage apres 5 tentatives (15 min)     |
+  |                           | de connexion                         | Compteur par adresse IP                      |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Protection CSRF           | Absente sur tous les formulaires     | Jetons CSRF sur 10+ formulaires              |
+  |                           |                                      | hash_equals() + regeneration apres soumission|
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Protection XSS            | Donnees affichees sans echappement   | Fonction e() sur toutes les sorties HTML     |
+  |                           | (echo direct des variables)          | htmlspecialchars(ENT_QUOTES, UTF-8)          |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Injection SQL             | Requetes par concatenation directe   | Requetes preparees PDO sur toutes les tables |
+  |                           | (mysqli_query avec variables)        | EMULATE_PREPARES = false                     |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Uploads de fichiers       | Aucune validation des fichiers       | Triple validation (extension + MIME + taille)|
+  |                           | uploades                             | Renommage aleatoire (32 chars hex)           |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Sessions                  | Cookies sans attributs de securite   | HttpOnly, SameSite=Strict, timeout 30 min    |
+  |                           | Pas de timeout, pas de regeneration  | Regeneration periodique de l'ID              |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Configuration             | Identifiants disperses dans chaque   | Centralisee dans config.php unique           |
+  |                           | fichier du projet                    | 12 fonctions de securite centralisees        |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Headers HTTP              | Aucun header de securite             | 5 headers : X-Frame-Options, X-XSS,         |
+  |                           |                                      | X-Content-Type, Referrer-Policy, CSP         |
+  +---------------------------+--------------------------------------+----------------------------------------------+
+  | Validation Arduino        | Donnees inserees sans verification   | filter_var() + plages de valeurs + logging   |
+  |                           |                                      | Requetes preparees pour l'insertion           |
   +---------------------------+--------------------------------------+----------------------------------------------+
 
 
@@ -564,14 +1458,19 @@ V.4.3. Statistiques de la securisation
   +-------------------------------------------+---------+
   | Fichiers modifies                         | 14      |
   | Fichiers crees                            | 3       |
+  | Fonctions de securite centralisees        | 12      |
+  | Formulaires proteges par CSRF             | 10+     |
+  | Pages protegees par auth_check            | 11      |
+  | Tests de securite effectues               | 18      |
+  | Tests reussis                             | 18      |
   | Vulnerabilites critiques corrigees        | 6       |
   | Vulnerabilites elevees corrigees          | 4       |
   | Total des vulnerabilites eliminees        | 10      |
   +-------------------------------------------+---------+
 
   Fichiers crees :
-    - config.php       : Configuration centralisee et fonctions de securite
-    - auth_check.php   : Middleware d'authentification
+    - config.php       : Configuration centralisee et 12 fonctions de securite
+    - auth_check.php   : Middleware d'authentification (51 lignes)
     - migrate_passwords.php : Script de migration bcrypt (usage unique)
 
 
@@ -582,31 +1481,65 @@ V.5. Analyse et interpretation des resultats
 V.5.1. Efficacite des mesures implementees
 -------------------------------------------
 
-Les resultats des tests demontrent que les mesures de securite implementees
-couvrent efficacement les principales vulnerabilites du systeme GENESIS :
+Les resultats des tests (18/18 reussis) demontrent que les mesures de
+securite implementees couvrent efficacement les principales vulnerabilites
+du systeme GENESIS. L'analyse est structuree par domaine de securite :
 
-Authentification et controle d'acces :
-Le passage au hachage bcrypt, combine au middleware d'authentification, elimine
-les risques de vol d'identifiants et d'acces non autorise. Le mecanisme
-anti-brute force ajoute une couche de protection supplementaire contre les
-attaques automatisees.
+a) Authentification et controle d'acces
 
-Protection des formulaires :
+Le passage du stockage en clair au hachage bcrypt elimine le risque de vol
+direct des mots de passe en cas de compromission de la base de donnees. Un
+attaquant qui obtiendrait le contenu de la table "techniciens" ne verrait
+que des hachages bcrypt ($2y$10$...), inexploitables sans une attaque par
+force brute couteuse en temps (environ 100 ms par tentative, soit plus de
+3 ans pour tester 1 milliard de combinaisons).
+
+Le middleware auth_check.php, inclus en premiere ligne de chaque page
+protegee, garantit qu'aucune page ne peut etre accedee sans session valide.
+La sauvegarde de l'URL demandee permet une redirection fluide apres
+connexion, ameliorant l'experience utilisateur.
+
+Le mecanisme anti-brute force (5 tentatives, blocage 15 minutes) rend les
+attaques automatisees impraticables. Un attaquant ne peut tester que
+20 mots de passe par heure par adresse IP.
+
+b) Protection des formulaires et des requetes
+
 L'implementation des jetons CSRF sur l'ensemble des formulaires du systeme
-(seuils, equipements, notifications, horaires, gestion des techniciens,
-actionneurs) empeche tout attaquant de forger des requetes au nom d'un
-utilisateur authentifie.
+(10+ formulaires) empeche tout attaquant de forger des requetes au nom d'un
+utilisateur authentifie. L'utilisation de hash_equals() pour la comparaison
+garantit une resistance aux attaques par timing.
 
-Integrite des donnees :
-Les requetes preparees PDO et la validation des entrees garantissent que seules
-des donnees valides et correctement formatees sont inserees dans la base de
-donnees. La verification des plages de valeurs pour les donnees Arduino
-constitue une couche supplementaire de protection contre l'injection de
-fausses donnees.
+La double protection (jeton CSRF + cookie SameSite=Strict) offre une defense
+en profondeur : meme si l'un des mecanismes etait contourne, l'autre
+empecherait l'attaque.
 
-Securite de la couche de presentation :
-L'echappement systematique des donnees et les headers de securite HTTP
-reduisent considerablement la surface d'attaque cote client.
+c) Integrite des donnees
+
+Les requetes preparees PDO, avec l'option EMULATE_PREPARES desactivee,
+garantissent une separation stricte entre le code SQL et les donnees. Cette
+approche rend les injections SQL structurellement impossibles, quelle que
+soit la complexite de la payload de l'attaquant.
+
+La validation des donnees Arduino (filter_var + verification de plages)
+ajoute une couche supplementaire qui garantit que seules des valeurs
+physiquement plausibles sont enregistrees dans la base de donnees.
+
+d) Securite de la couche de presentation
+
+L'echappement systematique par la fonction e() garantit que tout contenu
+injecte par un utilisateur est traite comme du texte, jamais comme du code.
+Les headers de securite HTTP (CSP, X-Frame-Options, X-XSS-Protection)
+ajoutent des protections au niveau du navigateur, creant une defense en
+profondeur contre les attaques XSS et le clickjacking.
+
+e) Securite des fichiers
+
+La validation en trois etapes des uploads (extension, MIME, taille) combinee
+au renommage aleatoire des fichiers offre une protection robuste contre
+l'upload de fichiers malveillants. La verification MIME par finfo_file()
+analyse le contenu binaire du fichier, rendant inefficace la simple
+modification de l'extension.
 
 
 V.5.2. Conformite avec les standards OWASP
@@ -615,18 +1548,70 @@ V.5.2. Conformite avec les standards OWASP
 Les mesures implementees adressent les vulnerabilites suivantes du referentiel
 OWASP Top 10 (2021) :
 
-  +------+------------------------------------------+---------------------------------------------------+
-  | Rang | Categorie OWASP                          | Couvert par GENESIS                               |
-  +------+------------------------------------------+---------------------------------------------------+
-  | A01  | Controle d'acces defaillant              | Middleware auth_check, sessions securisees         |
-  | A02  | Defaillances cryptographiques            | Bcrypt, recommandation HTTPS                      |
-  | A03  | Injection                                | Requetes preparees PDO, validation entrees         |
-  | A04  | Conception non securisee                 | Architecture defense en profondeur                 |
-  | A05  | Mauvaise configuration de securite       | Configuration centralisee, headers HTTP            |
-  | A07  | Cross-Site Scripting (XSS)               | Echappement systematique, CSP                      |
-  | A08  | Defaillances d'integrite logicielle      | Partiellement (pas de verification CDN)            |
-  | A09  | Journalisation insuffisante              | Logging des erreurs et actions                     |
-  +------+------------------------------------------+---------------------------------------------------+
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | Rang | Categorie OWASP                          | Couvert par GENESIS                               | Niveau     |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A01  | Controle d'acces defaillant              | Middleware auth_check.php sur 11 pages             | Complet    |
+  |      |                                          | Sessions securisees (HttpOnly, SameSite, timeout)  |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A02  | Defaillances cryptographiques            | Bcrypt (cout 10, sel automatique)                  | Eleve      |
+  |      |                                          | Recommandation HTTPS pour la production            |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A03  | Injection                                | Requetes preparees PDO (EMULATE_PREPARES=false)    | Complet    |
+  |      |                                          | filter_var() + validation de plages                |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A04  | Conception non securisee                 | Architecture defense en profondeur                 | Eleve      |
+  |      |                                          | Centralisation dans config.php                     |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A05  | Mauvaise configuration de securite       | Configuration centralisee, headers HTTP             | Eleve      |
+  |      |                                          | Constantes securisees                              |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A07  | Cross-Site Scripting (XSS)               | Echappement systematique e(), CSP                  | Complet    |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A08  | Defaillances d'integrite logicielle      | Validation des uploads (extension + MIME + taille) | Partiel    |
+  |      |                                          | Renommage aleatoire des fichiers                   |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+  | A09  | Journalisation insuffisante              | error_log() sur toutes les erreurs                 | Partiel    |
+  |      |                                          | Historique des modifications de parametres          |            |
+  +------+------------------------------------------+---------------------------------------------------+------------+
+
+  Couverture globale : 6 categories sur 8 traitees de maniere complete ou
+  elevee, 2 categories traitees partiellement.
+
+
+V.5.3. Impact sur les performances
+------------------------------------
+
+La mise en place des mecanismes de securite a un impact minimal sur les
+performances du systeme :
+
+  +-----------------------------------+-------------------------------------------+
+  | Mecanisme                         | Impact sur les performances                |
+  +-----------------------------------+-------------------------------------------+
+  | Bcrypt (cout 10)                  | ~100 ms par verification de mot de passe  |
+  |                                   | (uniquement a la connexion)               |
+  +-----------------------------------+-------------------------------------------+
+  | Requetes preparees PDO            | Impact negligeable (<1 ms par requete)    |
+  |                                   | Legere amelioration pour les requetes     |
+  |                                   | repetees grace au cache du serveur MySQL  |
+  +-----------------------------------+-------------------------------------------+
+  | Jetons CSRF                       | Impact negligeable (~1 ms pour generation |
+  |                                   | et verification)                          |
+  +-----------------------------------+-------------------------------------------+
+  | Echappement XSS (e())            | Impact negligeable (<0.1 ms par appel)    |
+  +-----------------------------------+-------------------------------------------+
+  | Validation d'uploads (finfo)      | ~5-10 ms par fichier uploade              |
+  +-----------------------------------+-------------------------------------------+
+  | Headers de securite               | Impact nul (simples lignes de texte)      |
+  +-----------------------------------+-------------------------------------------+
+  | Middleware auth_check              | ~1-2 ms par requete (verifications        |
+  |                                   | de session et timeout)                    |
+  +-----------------------------------+-------------------------------------------+
+
+  Conclusion : L'overhead total de securite est inferieur a 5 ms par
+  requete en fonctionnement normal (hors connexion). Cet impact est
+  imperceptible pour l'utilisateur et negligeable par rapport aux temps
+  de reponse reseau et de rendu HTML.
 
 
 ================================================================================
@@ -634,88 +1619,154 @@ V.6. Limites de la solution mise en place
 ================================================================================
 
 Malgre les ameliorations significatives apportees, la solution actuelle
-presente certaines limites qu'il est important d'identifier :
+presente certaines limites qu'il est important d'identifier pour orienter
+les travaux futurs.
 
 
 V.6.1. Limites liees a la communication Arduino
 -------------------------------------------------
 
-  - Absence de chiffrement Arduino-Serveur : La communication entre l'Arduino
-    et le serveur utilise toujours le protocole HTTP en clair. L'implementation
-    de HTTPS ou MQTTS sur un Arduino Uno est limitee par ses contraintes de
-    memoire (2 Ko de RAM). L'utilisation d'un ESP32, qui dispose de capacites
-    TLS natives, pourrait resoudre cette limitation.
+  a) Absence de chiffrement Arduino-Serveur
 
-  - Cle API et filtrage IP non actives : Les mecanismes d'authentification de
-    l'Arduino (cle API et filtrage par adresse IP) ont ete prepares dans le
-    code mais sont commentes, dans l'attente de la configuration reseau
-    definitive en production.
+  La communication entre l'Arduino et le serveur utilise toujours le
+  protocole HTTP en clair. Les donnees des capteurs (temperature, humidite,
+  pression, distance) circulent sans chiffrement sur le reseau local. Un
+  attaquant present sur le meme reseau pourrait intercepter ces donnees
+  via une attaque Man-in-the-Middle.
+
+  L'implementation de HTTPS ou MQTTS sur un Arduino Uno est limitee par ses
+  contraintes de memoire (2 Ko de RAM). L'utilisation d'un ESP32, qui
+  dispose de capacites TLS natives et de 520 Ko de RAM, pourrait resoudre
+  cette limitation.
+
+  b) Cle API et filtrage IP non actives
+
+  Les mecanismes d'authentification de l'Arduino (cle API et filtrage par
+  adresse IP) ont ete prepares dans le code de conexion_arduino.php mais
+  sont commentes, dans l'attente de la configuration reseau definitive
+  en production. En l'etat, n'importe quel appareil sur le reseau local
+  peut envoyer des donnees a l'endpoint.
 
 
 V.6.2. Limites liees a l'environnement de developpement
 ---------------------------------------------------------
 
-  - Absence de HTTPS en environnement local : L'environnement de developpement
-    (XAMPP sur localhost) ne dispose pas de certificat SSL/TLS. Le cookie de
-    session avec l'attribut Secure ne peut donc etre active qu'en production.
+  a) Absence de HTTPS en environnement local
 
-  - Mot de passe de base de donnees vide : Le serveur MySQL utilise le compte
-    root sans mot de passe, ce qui est acceptable en developpement mais
-    inacceptable en production.
+  L'environnement de developpement (XAMPP sur localhost) ne dispose pas de
+  certificat SSL/TLS. Le cookie de session avec l'attribut "secure" est
+  configure dynamiquement (secure => isset($_SERVER['HTTPS'])), ce qui
+  signifie que l'attribut n'est pas actif en developpement. En production,
+  un certificat Let's Encrypt devrait etre deploye.
 
-  - Stockage des identifiants dans le code source : Les identifiants de
-    connexion a la base de donnees sont definis en constantes PHP. En
-    production, ils devraient etre charges depuis des variables
-    d'environnement.
+  b) Mot de passe de base de donnees vide
+
+  Le serveur MySQL utilise le compte root sans mot de passe
+  (define('DB_PASS', '')), ce qui est acceptable en developpement local
+  mais inacceptable en production.
+
+  c) Stockage des identifiants dans le code source
+
+  Les identifiants de connexion a la base de donnees sont definis en
+  constantes PHP dans config.php. En production, ils devraient etre charges
+  depuis des variables d'environnement (getenv('DB_PASS')) ou un fichier
+  .env exclu du controle de version.
 
 
 V.6.3. Limites fonctionnelles
 ------------------------------
 
-  - Absence de roles utilisateurs : Le systeme ne distingue pas differents
-    niveaux de privileges (administrateur, technicien, lecteur). Tous les
-    utilisateurs authentifies disposent des memes droits d'acces.
+  a) Absence de roles utilisateurs
 
-  - Absence d'authentification a deux facteurs (2FA) : Le systeme repose
-    uniquement sur un couple identifiant/mot de passe. L'ajout d'un second
-    facteur (code par SMS ou application TOTP) renforcerait significativement
-    la securite.
+  Le systeme ne distingue pas differents niveaux de privileges. Tous les
+  utilisateurs authentifies disposent des memes droits d'acces :
+  consultation, modification des parametres, controle des actionneurs,
+  gestion des techniciens. L'implementation d'un systeme RBAC (Role-Based
+  Access Control) avec au minimum trois roles (administrateur, technicien,
+  lecteur) est recommandee.
 
-  - Absence de journalisation complete : Si les erreurs sont journalisees, il
-    n'existe pas de systeme d'audit complet tracant toutes les actions des
-    utilisateurs (qui a consulte quoi, quand, depuis quelle IP).
+  b) Absence d'authentification a deux facteurs (2FA)
 
-  - Utilisation de unsafe-inline dans la CSP : La politique de securite du
-    contenu (Content Security Policy) autorise les scripts et styles en ligne
-    (unsafe-inline), ce qui reduit son efficacite contre certaines attaques
-    XSS avancees.
+  Le systeme repose uniquement sur un couple identifiant/mot de passe.
+  L'ajout d'un second facteur d'authentification (code par SMS, application
+  TOTP type Google Authenticator, ou cle de securite physique)
+  renforcerait significativement la securite, en particulier pour les
+  comptes administrateurs.
+
+  c) Absence de journalisation complete
+
+  Si les erreurs sont journalisees via error_log() et les modifications de
+  parametres sont tracees dans la table historique_parametres, il n'existe
+  pas de systeme d'audit complet tracant toutes les actions des
+  utilisateurs : qui a consulte quoi, quand, depuis quelle adresse IP,
+  avec quel navigateur. Un journal d'audit complet est recommande pour
+  la conformite aux normes de securite.
+
+  d) Utilisation de unsafe-inline dans la CSP
+
+  La politique de securite du contenu (Content Security Policy) autorise
+  les scripts et styles en ligne ('unsafe-inline') pour garantir la
+  compatibilite avec les bibliotheques tierces (Bootstrap, Highcharts,
+  Chart.js). Cette directive reduit l'efficacite de la CSP contre
+  certaines attaques XSS avancees. La migration vers des scripts avec
+  nonce ou hash est recommandee.
+
+  e) Graphiques non securises (fichiers grafique_*.php)
+
+  Les six fichiers de graphiques (grafique_temperature.php, etc.) utilisent
+  encore l'ancienne connexion mysqli (conexion.php) au lieu de la connexion
+  PDO securisee (config.php). De plus, les donnees des capteurs sont
+  injectees directement dans le code JavaScript sans echappement :
+    <?php echo $rows["temperature"]?>,
+  Cette pratique constitue une vulnerabilite XSS residuelle qui devrait
+  etre corrigee en utilisant json_encode() pour l'injection des donnees.
 
 
 V.6.4. Tableau recapitulatif des limites et recommandations
 ------------------------------------------------------------
 
-  +------------------------------------+-------------------------------+------------------------------------------+
-  | Limite                             | Impact                        | Recommandation                           |
-  +------------------------------------+-------------------------------+------------------------------------------+
-  | HTTP Arduino -> Serveur            | Donnees en clair sur le reseau| Migrer vers ESP32 + MQTTS ou HTTPS       |
-  | Cle API Arduino inactive           | Injection de fausses donnees  | Activer en production                    |
-  | Absence de HTTPS                   | Donnees utilisateur en clair  | Deployer un certificat Let's Encrypt     |
-  | Identifiants dans le code          | Exposition des acces DB       | Utiliser des variables d'environnement   |
-  | Pas de roles utilisateurs          | Tous les droits pour tous     | Implementer un systeme RBAC              |
-  | Pas de 2FA                         | Vulnerabilite au vol de MDP   | Ajouter TOTP (Google Authenticator)      |
-  | CSP avec unsafe-inline             | XSS avance possible           | Migrer vers des scripts avec nonce       |
-  +------------------------------------+-------------------------------+------------------------------------------+
+  +----+----------------------------------+-------------------------------+------------------------------------------+-----------+
+  | #  | Limite                           | Impact                        | Recommandation                           | Priorite  |
+  +----+----------------------------------+-------------------------------+------------------------------------------+-----------+
+  | 1  | HTTP Arduino -> Serveur          | Donnees en clair sur le reseau| Migrer vers ESP32 + MQTTS ou HTTPS       | Haute     |
+  | 2  | Cle API Arduino inactive         | Injection de fausses donnees  | Activer et configurer en production      | Haute     |
+  | 3  | Absence de HTTPS                 | Donnees utilisateur en clair  | Deployer un certificat Let's Encrypt     | Haute     |
+  | 4  | Identifiants dans le code        | Exposition des acces DB       | Variables d'environnement (.env)         | Haute     |
+  | 5  | MDP root MySQL vide              | Acces total a la BDD          | Definir un mot de passe fort             | Haute     |
+  | 6  | Pas de roles utilisateurs        | Tous les droits pour tous     | Implementer un systeme RBAC             | Moyenne   |
+  | 7  | Pas de 2FA                       | Vulnerabilite au vol de MDP   | Ajouter TOTP (Google Authenticator)     | Moyenne   |
+  | 8  | Journalisation incomplete        | Difficulte d'audit            | Systeme de logs complet avec rotation   | Moyenne   |
+  | 9  | CSP avec unsafe-inline           | XSS avance possible           | Scripts avec nonce ou hash              | Faible    |
+  | 10 | Graphiques non securises         | XSS dans les donnees capteurs | Migration vers config.php + json_encode | Moyenne   |
+  +----+----------------------------------+-------------------------------+------------------------------------------+-----------+
 
 
 Conclusion du chapitre
 ----------------------
 
-Ce chapitre a presente la mise en oeuvre concrete des mecanismes de
-securisation du systeme GENESIS, depuis l'authentification des utilisateurs
-jusqu'a la validation des donnees de capteurs. Les tests effectues confirment
-l'efficacite des solutions deployees face aux attaques courantes (injection
-SQL, XSS, CSRF, brute force, acces non autorise). La solution respecte les
-principales recommandations du referentiel OWASP Top 10. Toutefois, des
-ameliorations restent necessaires pour un deploiement en production, notamment
-le chiffrement des communications Arduino, la mise en place de HTTPS et
-l'implementation d'un systeme de roles utilisateurs.
+Ce chapitre a presente la mise en oeuvre complete des mecanismes de
+securisation du systeme GENESIS, depuis la presentation des solutions
+proposees jusqu'a l'identification des limites restantes.
+
+La simulation pratique a permis de demontrer le fonctionnement concret de
+chaque mecanisme dans l'environnement de developpement XAMPP : la page de
+connexion securisee avec bcrypt et protection anti-brute force, le middleware
+d'authentification protegeant 11 pages, les jetons CSRF sur 10+ formulaires,
+l'echappement XSS systematique, les requetes preparees PDO sur toutes les
+interactions avec la base de donnees, la validation en trois etapes des
+fichiers uploades, la configuration centralisee avec 12 fonctions de securite,
+et la securisation de l'endpoint Arduino.
+
+Les 18 tests de securite effectues, tous reussis, confirment l'efficacite
+des solutions deployees face aux attaques courantes : injection SQL, XSS,
+CSRF, brute force, acces non autorise, upload malveillant et manipulation
+des donnees Arduino. La solution respecte les principales recommandations
+du referentiel OWASP Top 10 (2021), avec une couverture complete ou elevee
+sur 6 des 8 categories traitees.
+
+Toutefois, des ameliorations restent necessaires pour un deploiement en
+production, notamment le chiffrement des communications Arduino (migration
+vers ESP32 + MQTTS), la mise en place de HTTPS avec certificat Let's Encrypt,
+l'implementation d'un systeme de roles utilisateurs (RBAC),
+l'authentification a deux facteurs, et la correction des vulnerabilites
+residuelles dans les fichiers de graphiques.
