@@ -1,0 +1,104 @@
+================================================================================
+              CONCLUSION GENERALE ET PERSPECTIVES
+================================================================================
+
+
+Conclusion generale
+-------------------
+
+Le present memoire a porte sur la conception, le developpement et la
+securisation d'un systeme IoT de gestion de serre connectee, baptise GENESIS.
+Ce projet repond a un besoin concret de supervision et de controle automatise
+des parametres environnementaux d'une serre agricole : temperature, humidite,
+luminosite, niveau d'eau, concentration en CO2 et gestion de l'arrosage.
+
+Le systeme developpe s'articule autour d'une architecture a trois couches :
+
+  - La couche de perception est constituee de capteurs physiques (DHT pour la
+    temperature et l'humidite, MQ-135 pour le CO2, LDR pour la luminosite,
+    capteur ultrasonique pour le niveau d'eau) connectes a un microcontroleur
+    Arduino.
+
+  - La couche reseau assure la transmission des donnees par requetes HTTP vers
+    un serveur local XAMPP.
+
+  - La couche application repose sur une interface web developpee en PHP/MySQL,
+    offrant un tableau de bord en temps reel avec visualisation graphique
+    (Highcharts et Chart.js), un historique des mesures, un systeme de
+    parametrage des seuils et un controle manuel des actionneurs (pompe,
+    electrovanne, eclairage).
+
+L'un des apports majeurs de ce travail reside dans la securisation complete du
+systeme, suivant une approche de defense en profondeur conforme aux
+recommandations du referentiel OWASP Top 10. Dix vulnerabilites critiques et
+elevees ont ete identifiees et corrigees :
+
+  - Hachage bcrypt des mots de passe ;
+  - Protection contre les injections SQL par requetes preparees PDO ;
+  - Mise en place de jetons CSRF sur l'ensemble des formulaires ;
+  - Echappement systematique des donnees contre les attaques XSS ;
+  - Securisation des sessions (HttpOnly, SameSite, timeout, regeneration) ;
+  - Validation des uploads de fichiers (extension, MIME, taille) ;
+  - Centralisation de la configuration ;
+  - Deploiement de headers de securite HTTP ;
+  - Protection contre le brute force (verrouillage apres 5 tentatives) ;
+  - Middleware d'authentification sur toutes les pages protegees.
+
+Les tests realises ont confirme l'efficacite de ces mesures, avec un taux de
+reussite de 100% sur les dix scenarios de test effectues.
+
+
+================================================================================
+Perspectives
+================================================================================
+
+Les travaux futurs pourront s'orienter vers plusieurs axes d'amelioration :
+
+
+1. Sur le plan materiel
+-----------------------
+
+Le remplacement de l'Arduino Uno par un ESP32 permettrait d'integrer
+nativement le chiffrement TLS des communications et le protocole MQTT
+securise, eliminant la principale limite de securite identifiee. L'ajout de
+capteurs supplementaires (capteur de pH du sol, anemometre, pluviometre)
+enrichirait le suivi agronomique.
+
+
+2. Sur le plan logiciel
+-----------------------
+
+L'implementation d'un systeme de roles et permissions (RBAC - Role-Based
+Access Control) permettrait de differencier les niveaux d'acces entre
+administrateurs, techniciens et operateurs. L'ajout de l'authentification a
+deux facteurs (2FA/TOTP) renforcerait la securite de l'acces au systeme. Le
+developpement d'une application mobile faciliterait la supervision a distance.
+
+
+3. Sur le plan de l'intelligence artificielle
+----------------------------------------------
+
+L'integration d'algorithmes de machine learning pour la prediction des besoins
+en arrosage et la detection d'anomalies dans les donnees de capteurs
+constituerait une evolution significative vers une agriculture de precision
+plus autonome.
+
+
+4. Sur le plan de l'infrastructure
+-----------------------------------
+
+Le deploiement sur un serveur cloud avec certificat SSL/TLS (Let's Encrypt),
+l'utilisation de variables d'environnement pour les secrets et la mise en place
+d'un systeme de monitoring et d'alertes en temps reel (email, SMS)
+completeraient la solution pour un usage en production.
+
+
+================================================================================
+Mot de fin
+================================================================================
+
+En definitive, le systeme GENESIS constitue une base solide et securisee pour
+la gestion connectee de serres agricoles. Les fondations posees dans ce memoire
+- tant sur le plan architectural que securitaire - offrent un cadre extensible
+et adaptable aux evolutions futures des technologies IoT et de l'agriculture
+intelligente.

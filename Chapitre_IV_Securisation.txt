@@ -1,0 +1,422 @@
+================================================================================
+        CHAPITRE IV : MECANISMES DE SECURISATION DES ECHANGES DE DONNEES
+================================================================================
+
+
+Introduction
+------------
+
+La securite des systemes IoT constitue un enjeu majeur dans le deploiement de
+solutions connectees en environnement agricole. Le systeme GENESIS, qui implique
+la collecte de donnees sensibles depuis des capteurs physiques, leur transmission
+vers un serveur web et leur consultation via une interface en ligne, est expose
+a de nombreuses menaces. Ce chapitre presente les notions fondamentales de
+securite applicables aux systemes IoT, les mecanismes de protection des donnees,
+les protocoles securises utilisables et les choix retenus pour le contexte de la
+serre connectee GENESIS.
+
+
+================================================================================
+IV.1. Notions generales sur la securite des systemes IoT
+================================================================================
+
+IV.1.1. Definition et enjeux
+----------------------------
+
+L'Internet des Objets (IoT) designe l'ensemble des dispositifs physiques
+connectes a un reseau, capables de collecter, transmettre et recevoir des
+donnees. Dans le cas de GENESIS, ces dispositifs comprennent des capteurs de
+temperature, d'humidite, de luminosite, de niveau d'eau et de CO2, ainsi que
+des actionneurs (pompe, electrovanne, eclairage) pilotes par un microcontroleur
+Arduino.
+
+La securite d'un tel systeme est cruciale car une compromission pourrait
+entrainer :
+
+  - La falsification des donnees de capteurs, conduisant a des decisions
+    d'arrosage ou de ventilation erronees ;
+  - Le controle non autorise des actionneurs, pouvant provoquer des dommages
+    physiques sur les cultures ;
+  - Le vol d'informations sur les parametres de la serre et les identifiants
+    des techniciens ;
+  - L'indisponibilite du systeme, empechant la supervision en temps reel.
+
+
+IV.1.2. Surface d'attaque d'un systeme IoT
+-------------------------------------------
+
+La surface d'attaque d'un systeme IoT comme GENESIS se decompose en plusieurs
+couches :
+
+  +-------------+----------------------------------------------+-----------------------------+
+  | Couche      | Composants GENESIS                           | Menaces potentielles        |
+  +-------------+----------------------------------------------+-----------------------------+
+  | Perception  | Capteurs (DHT, MQ-135, LDR, ultrason)        | Falsification, brouillage   |
+  | Reseau      | Communication Arduino - Serveur (HTTP/GET)   | Interception, injection     |
+  | Application | Interface web PHP/MySQL                      | Injection SQL, XSS, CSRF   |
+  | Donnees     | Base de donnees MySQL (ardbd)                 | Acces non autorise, fuite   |
+  +-------------+----------------------------------------------+-----------------------------+
+
+
+IV.1.3. Principes fondamentaux de la securite
+----------------------------------------------
+
+La securisation du systeme GENESIS repose sur les trois piliers de la securite
+informatique, communement appeles la triade CIA :
+
+  - Confidentialite : Garantir que seules les personnes autorisees accedent
+    aux donnees des capteurs et aux commandes des actionneurs ;
+  - Integrite : S'assurer que les donnees transmises par les capteurs ne sont
+    pas alterees entre l'Arduino et le serveur ;
+  - Disponibilite : Maintenir le systeme operationnel et accessible pour la
+    supervision en temps reel.
+
+A ces trois piliers s'ajoutent deux proprietes complementaires essentielles :
+
+  - L'authentification : Verifier l'identite des utilisateurs et des
+    equipements ;
+  - La tracabilite : Enregistrer les actions effectuees pour permettre un
+    audit ulterieur.
+
+
+================================================================================
+IV.2. Chiffrement des donnees en transit et au repos
+================================================================================
+
+IV.2.1. Chiffrement en transit
+------------------------------
+
+Le chiffrement en transit vise a proteger les donnees pendant leur transmission
+entre les differents composants du systeme.
+
+a) Communication Arduino -> Serveur
+
+Dans l'architecture GENESIS, l'Arduino envoie les donnees des capteurs au
+serveur via des requetes HTTP GET. Sans chiffrement, ces donnees circulent en
+clair sur le reseau local, exposant les valeurs des capteurs a une interception.
+
+Le protocole TLS (Transport Layer Security) permet de chiffrer cette
+communication en etablissant un canal securise entre le client et le serveur.
+Le passage de HTTP a HTTPS garantit que :
+
+  - Les donnees des capteurs (temperature, humidite, CO2, etc.) sont chiffrees
+    pendant le transport ;
+  - Un attaquant ne peut pas lire ni modifier les valeurs en transit (attaque
+    Man-in-the-Middle) ;
+  - L'identite du serveur est verifiee par un certificat numerique.
+
+b) Communication Navigateur -> Serveur Web
+
+L'interface web GENESIS, accessible via un navigateur, transmet des donnees
+sensibles : identifiants de connexion, commandes d'actionneurs, parametres de
+configuration. Le protocole HTTPS est indispensable pour proteger ces echanges.
+
+
+IV.2.2. Chiffrement au repos
+-----------------------------
+
+Le chiffrement au repos concerne la protection des donnees stockees dans la
+base de donnees MySQL "ardbd". Deux categories de donnees necessitent une
+attention particuliere :
+
+a) Les mots de passe
+
+Les mots de passe des techniciens ne doivent jamais etre stockes en clair.
+L'algorithme bcrypt est la reference pour le hachage des mots de passe.
+Il offre :
+
+  - Un salage automatique : chaque mot de passe est hache avec un sel unique,
+    empechant les attaques par tables arc-en-ciel ;
+  - Un cout ajustable : le parametre de cout (par defaut 10) permet d'augmenter
+    le temps de calcul a mesure que la puissance des machines augmente ;
+  - Une resistance au brute force : le temps de hachage (environ 100 ms) rend
+    les attaques par force brute impraticables.
+
+b) Les donnees de capteurs
+
+Les donnees historiques des capteurs (table "table_capteurs") contiennent des
+informations sur les conditions environnementales de la serre. Selon le niveau
+de sensibilite requis, un chiffrement au niveau de la base de donnees (MySQL
+Transparent Data Encryption) ou au niveau applicatif peut etre envisage.
+
+
+================================================================================
+IV.3. Mecanismes d'authentification des equipements
+================================================================================
+
+IV.3.1. Authentification des utilisateurs
+-----------------------------------------
+
+L'authentification des utilisateurs est le premier rempart contre les acces
+non autorises. Plusieurs mecanismes sont envisageables :
+
+  +------------------------------------------+------------------------------+-------------------+
+  | Mecanisme                                | Description                  | Niveau de securite|
+  +------------------------------------------+------------------------------+-------------------+
+  | Mot de passe simple                      | Comparaison en clair         | Faible            |
+  | Mot de passe hache (bcrypt)              | Hachage avec sel             | Eleve             |
+  | Authentification a deux facteurs (2FA)   | Mot de passe + code temp.    | Tres eleve        |
+  | Certificat client                        | Auth. par certificat X.509   | Tres eleve        |
+  +------------------------------------------+------------------------------+-------------------+
+
+Pour le contexte GENESIS, l'authentification par mot de passe hache avec
+bcrypt, combinee a un systeme de verrouillage apres tentatives echouees,
+offre un compromis adapte entre securite et facilite d'utilisation.
+
+
+IV.3.2. Authentification des equipements IoT
+---------------------------------------------
+
+L'Arduino qui transmet les donnees au serveur doit egalement etre authentifie
+pour empecher un attaquant d'injecter de fausses donnees de capteurs. Plusieurs
+approches sont possibles :
+
+a) Authentification par cle API
+
+Une cle secrete partagee entre l'Arduino et le serveur est incluse dans chaque
+requete. Le serveur verifie la cle avant d'accepter les donnees. Cette methode
+est simple a implementer sur un microcontroleur aux ressources limitees.
+
+b) Filtrage par adresse IP
+
+Le serveur n'accepte les donnees que depuis des adresses IP prealablement
+autorisees (par exemple, l'IP fixe de l'Arduino sur le reseau local). Cette
+approche est efficace en reseau local mais insuffisante si le reseau n'est
+pas isole.
+
+c) Certificats mutuels (mTLS)
+
+Le TLS mutuel implique que le serveur et le client (Arduino) s'authentifient
+mutuellement par certificats. Cette approche offre le niveau de securite le
+plus eleve mais requiert des ressources de calcul significatives, difficilement
+compatibles avec un Arduino classique.
+
+
+IV.3.3. Gestion des sessions
+-----------------------------
+
+Apres une authentification reussie, une session utilisateur est creee. La
+securisation des sessions repose sur :
+
+  - La regeneration de l'identifiant de session apres la connexion, pour
+    prevenir les attaques par fixation de session ;
+  - L'expiration automatique apres une periode d'inactivite (timeout) ;
+  - La configuration securisee des cookies : attributs HttpOnly (inaccessible
+    par JavaScript), SameSite (protection CSRF), et Secure (transmission
+    HTTPS uniquement).
+
+
+================================================================================
+IV.4. Gestion des autorisations et des acces
+================================================================================
+
+IV.4.1. Controle d'acces
+-------------------------
+
+Le controle d'acces determine les ressources auxquelles un utilisateur
+authentifie peut acceder. Dans GENESIS, un middleware d'authentification est
+necessaire pour verifier, a chaque requete, que l'utilisateur dispose d'une
+session valide avant d'acceder aux pages protegees (tableau de bord,
+parametrage, historique, controle des actionneurs).
+
+
+IV.4.2. Protection contre les attaques courantes
+-------------------------------------------------
+
+a) Cross-Site Request Forgery (CSRF)
+
+L'attaque CSRF exploite la session active d'un utilisateur pour lui faire
+executer des actions a son insu. La protection repose sur l'utilisation de
+jetons CSRF (tokens) : un jeton aleatoire unique est genere pour chaque
+session et inclus dans chaque formulaire. Le serveur verifie la presence
+et la validite du jeton avant de traiter la requete.
+
+b) Cross-Site Scripting (XSS)
+
+L'attaque XSS consiste a injecter du code JavaScript malveillant dans les
+pages web. La protection repose sur l'echappement systematique de toutes les
+donnees affichees, en convertissant les caracteres speciaux HTML (<, >, ", ',
+&) en entites HTML inoffensives.
+
+c) Injection SQL
+
+L'injection SQL exploite des requetes SQL mal construites pour acceder,
+modifier ou supprimer des donnees. La protection repose sur l'utilisation de
+requetes preparees (prepared statements) avec des parametres lies, qui separent
+les donnees des instructions SQL.
+
+
+IV.4.3. Validation des entrees
+-------------------------------
+
+Toute donnee provenant de l'exterieur (formulaires, parametres URL, donnees
+Arduino) doit etre validee avant traitement :
+
+  - Validation de type : verifier que les donnees correspondent au type
+    attendu (entier, flottant, chaine) ;
+  - Validation de plage : verifier que les valeurs se situent dans des limites
+    realistes (ex. : temperature entre -50 C et 100 C) ;
+  - Validation de format : verifier la conformite aux formats attendus (dates,
+    heures, adresses email).
+
+
+================================================================================
+IV.5. Presentation des protocoles securises
+================================================================================
+
+IV.5.1. HTTPS (HTTP Secure)
+----------------------------
+
+HTTPS est la version securisee du protocole HTTP, utilisant TLS pour chiffrer
+les communications. Dans le contexte GENESIS :
+
+  +-------------------------+----------------------------------------------------+
+  | Caracteristique         | Description                                        |
+  +-------------------------+----------------------------------------------------+
+  | Port                    | 443 (au lieu de 80 pour HTTP)                      |
+  | Chiffrement             | AES-128 ou AES-256                                 |
+  | Authentification        | Certificat X.509 du serveur                        |
+  | Integrite               | Verification par code HMAC                         |
+  +-------------------------+----------------------------------------------------+
+
+HTTPS est adapte pour la communication entre le navigateur des techniciens et
+le serveur web GENESIS, ainsi que pour la reception des donnees depuis l'Arduino
+(si celui-ci supporte TLS).
+
+
+IV.5.2. MQTT securise (MQTTS)
+------------------------------
+
+MQTT (Message Queuing Telemetry Transport) est un protocole de messagerie
+leger, concu pour les environnements IoT a faible bande passante. Sa version
+securisee, MQTTS, ajoute une couche TLS.
+
+  +-------------------------+----------------------------------------------------+
+  | Caracteristique         | Description                                        |
+  +-------------------------+----------------------------------------------------+
+  | Architecture            | Publish/Subscribe via un broker                    |
+  | Port securise           | 8883                                               |
+  | Authentification        | Nom d'utilisateur/mot de passe ou certificats      |
+  | QoS                     | 3 niveaux de qualite de service (0, 1, 2)          |
+  | Avantage IoT            | Tres faible consommation de bande passante          |
+  +-------------------------+----------------------------------------------------+
+
+MQTT est particulierement adapte aux microcontroleurs comme l'Arduino car il
+requiert peu de ressources et gere nativement la reconnexion en cas de perte
+de connexion.
+
+
+IV.5.3. TLS (Transport Layer Security)
+---------------------------------------
+
+TLS est le protocole de securite sous-jacent utilise par HTTPS et MQTTS.
+Il assure :
+
+  - Le handshake : negociation des algorithmes de chiffrement et echange
+    de cles ;
+  - Le chiffrement symetrique : les donnees sont chiffrees avec une cle de
+    session partagee ;
+  - L'authentification : verification de l'identite du serveur (et
+    optionnellement du client) par certificats ;
+  - L'integrite : detection de toute alteration des donnees en transit.
+
+La version TLS 1.2 est le minimum recommande, tandis que TLS 1.3 offre des
+performances ameliorees et une securite renforcee.
+
+
+IV.5.4. Comparaison des protocoles
+-----------------------------------
+
+  +---------------------+------+-------+------+-------+
+  | Critere             | HTTP | HTTPS | MQTT | MQTTS |
+  +---------------------+------+-------+------+-------+
+  | Chiffrement         | Non  | Oui   | Non  | Oui   |
+  | Auth. serveur       | Non  | Oui   | Opt. | Oui   |
+  | Consommation reseau | Faib.| Moy.  | T.fa.| Faib. |
+  | Adapte Arduino      | Oui  | Lim.* | Oui  | Lim.* |
+  | Adapte navigateur   | Oui  | Oui   | Non  | Non   |
+  +---------------------+------+-------+------+-------+
+
+  * Necessite une bibliotheque TLS et suffisamment de memoire RAM.
+
+
+================================================================================
+IV.6. Choix des solutions de securite adaptees au contexte GENESIS
+================================================================================
+
+IV.6.1. Contraintes du systeme
+------------------------------
+
+Le choix des solutions de securite pour GENESIS doit tenir compte des
+contraintes suivantes :
+
+  - Ressources limitees de l'Arduino : memoire RAM reduite (~2 Ko pour
+    l'Arduino Uno), rendant l'implementation de TLS complexe ;
+  - Reseau local : la serre fonctionne sur un reseau local (192.168.x.x),
+    limitant l'exposition aux attaques exterieures ;
+  - Nombre limite d'utilisateurs : quelques techniciens accedent au systeme ;
+  - Criticite moyenne : une indisponibilite temporaire n'entraine pas de
+    danger immediat pour les personnes.
+
+
+IV.6.2. Solutions retenues
+--------------------------
+
+En fonction de ces contraintes, les solutions de securite suivantes ont ete
+retenues pour le systeme GENESIS :
+
+  +----------------------------+---------------------------------------------+----------------------------------+
+  | Couche                     | Solution retenue                            | Justification                    |
+  +----------------------------+---------------------------------------------+----------------------------------+
+  | Auth. utilisateurs         | Bcrypt + verrouillage brute force           | Securite elevee, PHP natif       |
+  | Auth. Arduino              | Cle API + filtrage IP                       | Adapte ressources Arduino        |
+  | Protection sessions        | Cookies securises + timeout 30 min          | Defense en profondeur            |
+  | Protection formulaires     | Jetons CSRF sur tous les formulaires        | Prevention actions non autorisees|
+  | Protection affichage       | Echappement HTML (htmlspecialchars)         | Prevention XSS                   |
+  | Protection BDD             | Requetes preparees PDO                      | Prevention injection SQL         |
+  | Validation donnees         | Filtrage de type + plages de valeurs        | Integrite donnees capteurs       |
+  | Communication web          | HTTPS (recommande en production)            | Chiffrement navigateur-serveur   |
+  | Headers HTTP               | X-Frame-Options, CSP, X-XSS-Protection     | Protection navigateur client     |
+  | Configuration              | Centralisation (config.php)                 | Reduction surface d'attaque      |
+  +----------------------------+---------------------------------------------+----------------------------------+
+
+
+IV.6.3. Architecture de securite
+---------------------------------
+
+L'architecture de securite retenue pour GENESIS suit le principe de defense
+en profondeur, consistant a empiler plusieurs couches de protection :
+
+  +---------------------------------------------------+
+  |   Couche 1 : Headers HTTP de securite             |
+  |   (X-Frame-Options, CSP, HSTS)                    |
+  +---------------------------------------------------+
+  |   Couche 2 : Authentification                     |
+  |   (Login bcrypt + session securisee)              |
+  +---------------------------------------------------+
+  |   Couche 3 : Autorisation                         |
+  |   (Middleware auth_check sur chaque page)          |
+  +---------------------------------------------------+
+  |   Couche 4 : Protection CSRF                      |
+  |   (Jetons sur tous les formulaires)               |
+  +---------------------------------------------------+
+  |   Couche 5 : Validation des entrees               |
+  |   (Filtrage, type, plage de valeurs)              |
+  +---------------------------------------------------+
+  |   Couche 6 : Requetes preparees PDO               |
+  |   (Protection injection SQL)                      |
+  +---------------------------------------------------+
+  |   Couche 7 : Echappement en sortie                |
+  |   (Protection XSS)                                |
+  +---------------------------------------------------+
+
+
+Conclusion du chapitre
+----------------------
+
+Ce chapitre a presente les fondements theoriques et les mecanismes de securite
+applicables au systeme IoT GENESIS. L'analyse de la surface d'attaque, combinee
+aux contraintes materielles de l'Arduino et a l'architecture web PHP/MySQL, a
+conduit a la selection de solutions de securite adaptees, suivant une approche
+de defense en profondeur. Le chapitre suivant detaillera la mise en oeuvre
+concrete de ces mecanismes et les resultats des tests de securite effectues.
