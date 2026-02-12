@@ -1,0 +1,433 @@
+================================================================================
+     JONCTIONS ET INTERDEPENDANCES ENTRE LES CODES DU SYSTEME GENESIS
+================================================================================
+
+Ce document presente la cartographie des liens fonctionnels entre les
+differents fichiers du systeme GENESIS. Il constitue un support pour la
+redaction du memoire, en montrant comment chaque composant s'articule avec
+les autres pour former un systeme coherent.
+
+
+================================================================================
+1. FICHIER CENTRAL : config.php (Noyau du systeme)
+================================================================================
+
+Le fichier config.php est le point de jonction principal du systeme. Il est
+inclus (via require_once) par la quasi-totalite des fichiers du projet.
+
+  Fichiers qui dependent de config.php :
+  +-------------------------------+------------------------------------------+
+  | Fichier                       | Fonctions utilisees depuis config.php    |
+  +-------------------------------+------------------------------------------+
+  | login.php                     | getDBConnection(), verifyCSRFToken(),    |
+  |                               | generateCSRFToken(), e()                 |
+  | auth_check.php                | setSecurityHeaders(), SESSION_TIMEOUT    |
+  | index.php                     | getDBConnection(), e()                   |
+  | parametrage.php               | getDBConnection(), csrfField(),          |
+  |                               | verifyCSRFToken(), e()                   |
+  | ia.php                        | getDBConnection(), csrfField(),          |
+  |                               | validateUpload(), e()                    |
+  | historique.php                | getDBConnection(), e()                   |
+  | save_technicien.php           | getDBConnection(), verifyCSRFToken(),    |
+  |                               | validateUpload(), generateSecureFilename |
+  | delete_technicien.php         | getDBConnection(), verifyCSRFToken()     |
+  | save_fiche.php                | getDBConnection(), verifyCSRFToken(),    |
+  |                               | validateUpload()                         |
+  | save_horaire.php              | getDBConnection(), verifyCSRFToken()     |
+  | actionneur.php                | verifyCSRFToken(), ARDUINO_IP,           |
+  |                               | ARDUINO_PORT, ARDUINO_TIMEOUT            |
+  | excel.php                     | getDBConnection(), e()                   |
+  | generate_pdf.php              | getDBConnection()                        |
+  +-------------------------------+------------------------------------------+
+
+  Conclusion : config.php est le COEUR du systeme. Toute modification de ce
+  fichier impacte l'ensemble de l'application.
+
+
+================================================================================
+2. CHAINE D'AUTHENTIFICATION (Jonction verticale)
+================================================================================
+
+La chaine d'authentification forme une jonction verticale : chaque etape
+depend de la precedente.
+
+  Flux sequentiel :
+
+  login.php
+    |
+    |-- (1) Inclut config.php (connexion BDD, fonctions CSRF)
+    |-- (2) Verifie le jeton CSRF via verifyCSRFToken()
+    |-- (3) Interroge la table "agent" via getDBConnection()
+    |-- (4) Verifie le mot de passe avec password_verify() (bcrypt)
+    |-- (5) Cree la session ($_SESSION['username'], $_SESSION['last_activity'])
+    |-- (6) Redirige vers index.php
+    |
+    v
+  auth_check.php (MIDDLEWARE)
+    |
+    |-- (1) Inclut config.php
+    |-- (2) Verifie $_SESSION['username']
+    |-- (3) Verifie le timeout (SESSION_TIMEOUT = 1800 secondes)
+    |-- (4) Regenere l'identifiant de session periodiquement
+    |-- (5) Applique les headers de securite via setSecurityHeaders()
+    |
+    v
+  [Pages protegees : index.php, parametrage.php, historique.php, ia.php,
+   excel.php, actionneur.php]
+    |
+    |-- Chaque page protegee inclut auth_check.php en premiere ligne
+    |-- Si la session est invalide : redirection vers login.php
+    |
+    v
+  logout.php
+    |
+    |-- Detruit la session (session_destroy())
+    |-- Redirige vers login.php
+
+  Jonctions cles :
+  - login.php --> SESSION --> auth_check.php : Lien par variable de session
+  - auth_check.php --> config.php : Lien par inclusion (require_once)
+  - auth_check.php --> Pages protegees : Lien par inclusion en en-tete
+
+
+================================================================================
+3. FLUX DE DONNEES IoT (Jonction Arduino -> BDD -> Affichage)
+================================================================================
+
+Ce flux represente le chemin complet des donnees, depuis les capteurs
+physiques jusqu'a l'affichage dans l'interface web.
+
+  [Capteurs physiques]
+  DHT11 (temp/hum) + MQ-135 (CO2) + LDR (lumiere) + Ultrason (eau)
+    |
+    | (Connexion filaire vers Arduino)
+    v
+  [Arduino Uno / Microcontroleur]
+    |
+    | (Requete HTTP GET sur le reseau local 192.168.x.x)
+    | URL : /Project_final/control/conexion_arduino.php
+    |       ?temp_php=22.3&hum_php=65.5&pre_php=1013.25&dist_php=15
+    v
+  control/conexion_arduino.php
+    |
+    |-- (1) Inclut control/conexion_privada.php (connexion PDO)
+    |-- (2) Recupere les parametres GET : temp_php, hum_php, pre_php, dist_php
+    |-- (3) Valide avec filter_var() et FILTER_VALIDATE_FLOAT
+    |-- (4) Verifie les plages de valeurs (temp: -50 a 100, hum: 0 a 100)
+    |-- (5) Insere dans MySQL via requete preparee PDO
+    |        INSERT INTO tabla_sensor
+    |        (presion, humedad, temperatura, distancia, fecha)
+    |        VALUES (?, ?, ?, ?, NOW())
+    v
+  [Base de donnees MySQL - ardbd]
+    |
+    | Table : tabla_sensor (ou table_capteurs)
+    | Colonnes : presion, humedad, temperatura, distancia, fecha
+    |
+    +-------+-------+-------+-------+-------+-------+
+    |       |       |       |       |       |       |
+    v       v       v       v       v       v       v
+  grafique_  grafique_  grafique_  grafique_  grafique_  grafique_
+  temperature humidite   eau       lumiere    co2       arrosage
+  .php       .php       .php      .php       .php      .php
+    |
+    |-- Chaque fichier grafique_*.php :
+    |   (1) Se connecte a MySQL (via conexion.php ou config.php)
+    |   (2) Execute un SELECT sur tabla_sensor
+    |   (3) Genere un graphique Highcharts avec les donnees
+    |
+    v
+  [Navigateur du technicien : Graphiques interactifs Highcharts]
+
+  Jonctions cles :
+  - Arduino --> conexion_arduino.php : Lien HTTP GET (parametres URL)
+  - conexion_arduino.php --> conexion_privada.php : Lien par inclusion
+  - conexion_arduino.php --> MySQL : Lien PDO (requete preparee INSERT)
+  - grafique_*.php --> MySQL : Lien PDO/mysqli (requete SELECT)
+  - grafique_*.php --> Highcharts : Lien JavaScript (donnees JSON/PHP)
+
+
+================================================================================
+4. FLUX DE CONTROLE DES ACTIONNEURS (Jonction bidirectionnelle)
+================================================================================
+
+Ce flux montre la jonction entre l'interface web et le materiel physique
+pour le pilotage des actionneurs.
+
+  [Interface web : parametrage.php]
+    |
+    |-- (1) Le technicien configure les seuils et modes (auto/manuel)
+    |-- (2) Les parametres sont sauvegardes dans table_parametres
+    |-- (3) L'historique est enregistre dans historique_parametres
+    |
+    v
+  [Interface web : Boutons de controle]
+    |
+    | (Requete AJAX POST avec jeton CSRF)
+    v
+  actionneur.php (API JSON)
+    |
+    |-- (1) Verifie l'authentification (session)
+    |-- (2) Verifie le jeton CSRF
+    |-- (3) Valide l'action demandee (whitelist : pompe, vanne, lumiere)
+    |-- (4) Envoie la commande a l'Arduino via HTTP
+    |        URL : http://192.168.1.150:80/[commande]
+    |        Constantes : ARDUINO_IP, ARDUINO_PORT (depuis config.php)
+    |-- (5) Retourne le statut en JSON au navigateur
+    v
+  [Arduino : Actionneurs physiques]
+    |
+    |-- Pompe d'arrosage (ON/OFF)
+    |-- Electrovanne (OUVRIR/FERMER)
+    |-- Eclairage (ON/OFF)
+
+  Jonctions cles :
+  - parametrage.php --> MySQL : Sauvegarde des seuils (table_parametres)
+  - parametrage.php --> MySQL : Log des changements (historique_parametres)
+  - Interface web --> actionneur.php : Lien AJAX (POST + CSRF)
+  - actionneur.php --> config.php : Constantes ARDUINO_IP/PORT
+  - actionneur.php --> Arduino : Lien HTTP (commande physique)
+
+
+================================================================================
+5. FLUX DE GESTION DES TECHNICIENS (Jonction CRUD)
+================================================================================
+
+  ia.php (Page principale de gestion)
+    |
+    |-- Inclut : config.php, auth_check.php, menu.php
+    |-- Affiche : Liste des techniciens depuis MySQL
+    |-- Fournit : Formulaires d'ajout/modification avec CSRF
+    |
+    +---> save_technicien.php (CREATION/MODIFICATION)
+    |       |
+    |       |-- Verifie CSRF token
+    |       |-- Valide les champs (prenom, nom, role, email, telephone)
+    |       |-- Si photo : validateUpload() + generateSecureFilename()
+    |       |-- Deplace la photo vers Genesis/uploads/photos/
+    |       |-- INSERT ou UPDATE dans table "techniciens"
+    |       |-- Redirige vers ia.php
+    |
+    +---> delete_technicien.php (SUPPRESSION)
+    |       |
+    |       |-- Verifie CSRF token
+    |       |-- Verifie la methode POST
+    |       |-- DELETE FROM techniciens WHERE id = ?
+    |       |-- Redirige vers ia.php
+    |
+    +---> save_fiche.php (FICHES DE MAINTENANCE)
+    |       |
+    |       |-- Verifie CSRF token
+    |       |-- Si PDF : validateUpload($file, 'document')
+    |       |-- Deplace le PDF vers Genesis/uploads/fiches/
+    |       |-- INSERT dans table "maintenance_fiches"
+    |       |-- Redirige vers ia.php
+    |
+    +---> save_horaire.php (HORAIRES)
+            |
+            |-- Verifie CSRF token
+            |-- UPDATE table_parametres (horaires de fonctionnement)
+            |-- Redirige vers parametrage.php
+
+  Jonctions cles :
+  - ia.php --> save_*.php : Lien par formulaire POST + CSRF
+  - save_*.php --> config.php : Fonctions de validation et BDD
+  - save_*.php --> uploads/ : Lien par systeme de fichiers (photos, PDF)
+  - save_*.php --> ia.php : Lien par redirection HTTP (header Location)
+
+
+================================================================================
+6. FLUX D'EXPORT DE DONNEES (Jonction de sortie)
+================================================================================
+
+  [Pages du systeme]
+    |
+    +---> excel.php (Export Excel)
+    |       |
+    |       |-- Inclut config.php et auth_check.php
+    |       |-- SELECT depuis tabla_sensor (donnees historiques)
+    |       |-- Genere un fichier .xls (headers Content-Type)
+    |       |-- Telecharge dans le navigateur
+    |
+    +---> generate_pdf.php (Export PDF)
+    |       |
+    |       |-- Inclut config.php et fpdf.php
+    |       |-- SELECT depuis les tables de donnees
+    |       |-- Genere un rapport PDF avec la bibliotheque FPDF
+    |       |-- Utilise les polices dans Genesis/font/
+    |       |-- Telecharge dans le navigateur
+    |
+    +---> QR.php (Generation QR Code)
+            |
+            |-- Genere un QR code pour acces rapide au systeme
+
+  Jonctions cles :
+  - excel.php / generate_pdf.php --> config.php : Connexion BDD
+  - excel.php / generate_pdf.php --> MySQL : Requete SELECT
+  - generate_pdf.php --> fpdf.php : Bibliotheque de generation PDF
+  - generate_pdf.php --> font/ : Fichiers de polices
+
+
+================================================================================
+7. FLUX D'ALERTES EN TEMPS REEL (Jonction asynchrone)
+================================================================================
+
+  script.js (Frontend - Polling)
+    |
+    | (Requete AJAX toutes les 5 secondes)
+    v
+  check_alerts.php (Endpoint JSON)
+    |
+    |-- Connexion a MySQL (PDO)
+    |-- Requete : SELECT derniere valeur de chaque capteur
+    |-- Evaluation des seuils :
+    |     - Temperature > 30 C ou < 15 C  --> ALERTE
+    |     - Niveau d'eau < 20%            --> ALERTE
+    |     - CO2 > 800 ppm                 --> ALERTE
+    |-- Retourne un objet JSON avec les alertes actives
+    v
+  script.js (Frontend - Notification)
+    |
+    |-- Affiche les alertes dans le tableau de bord (index.php)
+    |-- Notifications visuelles pour le technicien
+
+  Jonctions cles :
+  - script.js --> check_alerts.php : Lien AJAX (polling periodique)
+  - check_alerts.php --> MySQL : Lien PDO (lecture capteurs)
+  - check_alerts.php --> script.js : Lien JSON (donnees d'alerte)
+  - script.js --> index.php : Lien DOM (affichage des notifications)
+
+
+================================================================================
+8. COMPOSANT D'INTERFACE PARTAGE : menu.php
+================================================================================
+
+Le fichier menu.php est inclus par toutes les pages principales pour
+afficher la barre de navigation laterale.
+
+  Pages qui incluent menu.php :
+  - index.php (Tableau de bord)
+  - parametrage.php (Configuration)
+  - historique.php (Historique)
+  - ia.php (Techniciens)
+  - grafique_*.php (Graphiques)
+
+  Ce fichier cree une jonction visuelle et navigationnelle entre toutes
+  les pages du systeme, assurant une experience utilisateur coherente.
+
+
+================================================================================
+9. SCHEMA RECAPITULATIF DES JONCTIONS
+================================================================================
+
+                          +-------------+
+                          | config.php  |  <-- NOYAU CENTRAL
+                          +------+------+
+                                 |
+              +------------------+------------------+
+              |                  |                  |
+       +------+------+   +------+------+   +-------+------+
+       | login.php   |   |auth_check.php|  | conexion_    |
+       | (Entree)    |   | (Middleware) |  | privada.php  |
+       +------+------+   +------+------+  +-------+------+
+              |                  |                  |
+              v                  v                  v
+        [SESSION]          [PROTECTION]       [ARDUINO]
+              |                  |                  |
+    +---------+---------+       |          +-------+-------+
+    |         |         |       |          |               |
+    v         v         v       v          v               v
+ index.php param.php ia.php historique  conexion_      actionneur
+ (Dashboard)(Config) (Tech) (.php)     arduino.php    .php
+    |         |         |       |          |               |
+    v         v         v       v          v               v
+ menu.php  menu.php menu.php menu.php  [MySQL]        [Arduino
+ (Nav)     (Nav)    (Nav)    (Nav)     tabla_sensor    Hardware]
+    |         |         |       |          |
+    |         |         |       |     +----+----+
+    |         |         |       |     |    |    |
+    |         |         |       v     v    v    v
+    |         |    save_*.php  grafique_*.php (x6)
+    |         |    delete_*.php    (Highcharts)
+    |         |         |
+    |         v         v
+    |    historique_  uploads/
+    |    parametres   photos/
+    |    (Log)        fiches/
+    |
+    +---> script.js --> check_alerts.php --> [Alertes JSON]
+    |
+    +---> excel.php / generate_pdf.php / QR.php --> [Exports]
+
+
+================================================================================
+10. TABLEAU DES JONCTIONS PAR TYPE
+================================================================================
+
+  +----------------------------+--------------------+-----------------------------+
+  | Type de jonction           | Mecanisme          | Exemples                    |
+  +----------------------------+--------------------+-----------------------------+
+  | Inclusion PHP              | require_once       | config.php, auth_check.php, |
+  |                            | include            | menu.php, fpdf.php          |
+  +----------------------------+--------------------+-----------------------------+
+  | Session PHP                | $_SESSION          | login.php -> auth_check.php |
+  |                            |                    | -> pages protegees          |
+  +----------------------------+--------------------+-----------------------------+
+  | Base de donnees (PDO)      | Requetes preparees | Tous fichiers -> MySQL      |
+  +----------------------------+--------------------+-----------------------------+
+  | Requete HTTP GET           | Parametres URL     | Arduino -> conexion_arduino |
+  +----------------------------+--------------------+-----------------------------+
+  | Requete HTTP POST + CSRF   | Formulaires HTML   | ia.php -> save_technicien   |
+  +----------------------------+--------------------+-----------------------------+
+  | Requete AJAX               | jQuery $.ajax      | script.js -> check_alerts   |
+  |                            |                    | Interface -> actionneur.php |
+  +----------------------------+--------------------+-----------------------------+
+  | Redirection HTTP           | header(Location)   | save_*.php -> ia.php        |
+  |                            |                    | login.php -> index.php      |
+  +----------------------------+--------------------+-----------------------------+
+  | Systeme de fichiers        | move_uploaded_file | save_technicien -> uploads/  |
+  |                            |                    | save_fiche -> uploads/       |
+  +----------------------------+--------------------+-----------------------------+
+  | Communication materielle   | HTTP vers Arduino  | actionneur.php -> Arduino   |
+  +----------------------------+--------------------+-----------------------------+
+  | Bibliotheque JavaScript    | Highcharts, jQuery | grafique_*.php, script.js   |
+  +----------------------------+--------------------+-----------------------------+
+
+
+================================================================================
+11. RECOMMANDATION POUR LE MEMOIRE
+================================================================================
+
+Ce document sur les jonctions peut s'integrer dans le memoire de plusieurs
+facons :
+
+  Option A : Comme section dans un chapitre "Architecture du systeme"
+  - Presente l'architecture logicielle et les flux de donnees
+  - Precede les chapitres IV (Securisation) et V (Mise en oeuvre)
+
+  Option B : Comme chapitre III independant
+  - Titre suggere : "Architecture logicielle et flux de donnees du systeme
+    GENESIS"
+  - Contenu : Description des composants, des jonctions et des flux
+
+  Option C : Comme annexe technique
+  - Complement au memoire pour les lecteurs souhaitant comprendre les
+    details techniques de l'implementation
+
+  Structure suggeree du memoire complet :
+  +-----+------------------------------------------------------+
+  | Ch. | Titre                                                |
+  +-----+------------------------------------------------------+
+  | I   | Introduction generale et contexte                    |
+  | II  | Etat de l'art (IoT, serres connectees, securite)     |
+  | III | Architecture logicielle et jonctions du systeme      |
+  |     | (CE DOCUMENT)                                        |
+  | IV  | Mecanismes de securisation des echanges de donnees   |
+  |     | (Chapitre_IV_Securisation.txt)                       |
+  | V   | Mise en oeuvre des solutions et resultats             |
+  |     | (Chapitre_V_Mise_en_oeuvre.txt)                      |
+  |     | Conclusion generale et perspectives                  |
+  |     | (Conclusion_Generale.txt)                            |
+  +-----+------------------------------------------------------+
+
+================================================================================
