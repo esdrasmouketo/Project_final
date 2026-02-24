@@ -258,7 +258,8 @@ $stmt->bind_param(
 );
 
 // Execute l'insertion dans la base de donnees
-$stmt->execute();
+$insert_ok = $stmt->execute();
+$insert_error = $stmt->error;
 
 // ================== AFFICHAGE HTML ==================
 
@@ -292,6 +293,15 @@ echo "<table>
 <tr><td>Arrosage</td><td>" . ($arrosage ? "ACTIF (1)" : "INACTIF (0)") . "</td><td>{$arrosage}</td><td><span class='badge badge-green'>+{$ajust_arrosage}</span></td></tr>
 <tr><td>CO2</td><td>{$co2} ppm</td><td>" . intval($co2) . "</td><td><span class='badge badge-green'>+{$ajust_co2}</span></td></tr>
 </table>";
+
+// Section 3 : Statut de la sauvegarde en base de donnees
+echo "<h3>Statut base de données</h3>";
+if ($insert_ok) {
+    echo "<ul><li><span>💾 Données sauvegardées</span><span class='badge badge-green'>OK ✓</span></li>
+    <li><span>Horodatage</span><span>" . date("d/m/Y H:i:s") . "</span></li></ul>";
+} else {
+    echo "<ul><li><span>⚠️ Erreur d'insertion</span><span style='color:red;font-weight:bold;'>" . htmlspecialchars($insert_error) . "</span></li></ul>";
+}
 
 // Fermeture de la carte blanche
 echo "</div>";
