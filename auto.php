@@ -242,24 +242,29 @@ $ajust_co2        = calculerAjustement($co2);          // Ajustement pour le CO2
 // Prepare une requete securisee (prepared statement) pour inserer les donnees des capteurs
 $stmt = $conn->prepare("
 INSERT INTO table_capteurs
-(niveau_eau, niveau_lumiere, arrosage, co2_level, temperature, humidity)
-VALUES (?, ?, ?, ?, ?, ?)
+(niveau_eau, niveau_lumiere, arrosage, co2_level, temperature, humidity, date_heure)
+VALUES (?, ?, ?, ?, ?, ?, NOW())
 ");
 
-// Lie les parametres : "dddddd" = 6 valeurs de type double (float)
-$stmt->bind_param(
-    "dddddd",
-    $niveau_eau,   // Parametre 1 : niveau d'eau
-    $lumiere,      // Parametre 2 : niveau de lumiere
-    $arrosage,     // Parametre 3 : statut arrosage (0 ou 1)
-    $co2,          // Parametre 4 : niveau de CO2
-    $temperature,  // Parametre 5 : temperature
-    $humidity      // Parametre 6 : humidite
-);
+if (!$stmt) {
+    $insert_ok = false;
+    $insert_error = "Erreur prepare() : " . $conn->error;
+} else {
+    // Lie les parametres : "dddddd" = 6 valeurs de type double (float)
+    $stmt->bind_param(
+        "dddddd",
+        $niveau_eau,   // Parametre 1 : niveau d'eau
+        $lumiere,      // Parametre 2 : niveau de lumiere
+        $arrosage,     // Parametre 3 : statut arrosage (0 ou 1)
+        $co2,          // Parametre 4 : niveau de CO2
+        $temperature,  // Parametre 5 : temperature
+        $humidity      // Parametre 6 : humidite
+    );
 
-// Execute l'insertion dans la base de donnees
-$insert_ok = $stmt->execute();
-$insert_error = $stmt->error;
+    // Execute l'insertion dans la base de donnees
+    $insert_ok = $stmt->execute();
+    $insert_error = $stmt->error;
+}
 
 // ================== AFFICHAGE HTML ==================
 
@@ -307,7 +312,7 @@ if ($insert_ok) {
 echo "</div>";
 
 // Fermeture de la requete preparee et de la connexion a la base de donnees
-$stmt->close();
+if ($stmt) $stmt->close();
 $conn->close();
 ?>
 
